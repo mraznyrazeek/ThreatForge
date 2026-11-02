@@ -2,16 +2,15 @@
 """
 ThreatForge - Alembic Migration Environment
 
-Loads PostgreSQL connection settings from the project .env.
+Connects Alembic to the local PostgreSQL database and
+registers SQLAlchemy model metadata for migrations.
 
-Supports online and offline migrations without storing
-database credentials in alembic.ini.
-
-SQLAlchemy model metadata will be registered when the
-database models are implemented.
+Database credentials are loaded from the project .env.
+Importing models does not create database tables.
 """
 
 import os
+import sys
 from logging.config import fileConfig
 from pathlib import Path
 
@@ -27,7 +26,24 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
+# Project structure:
+# ThreatForge/
+#   .env
+#   data-engineering/
+#     alembic/
+#       env.py
+#     src/
+#       models/
+#         database_models.py
+
+DATA_ENGINEERING_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = DATA_ENGINEERING_ROOT.parent
+MODELS_DIR = DATA_ENGINEERING_ROOT / "src" / "models"
+
+sys.path.insert(0, str(MODELS_DIR))
+
+from database_models import Base  # noqa: E402
+
 
 load_dotenv(
     PROJECT_ROOT / ".env",
@@ -36,7 +52,7 @@ load_dotenv(
 
 
 def get_database_url() -> URL:
-    """Build the connection URL without exposing credentials."""
+    """Build a PostgreSQL URL using environment settings."""
 
     required = (
         "DB_HOST",
@@ -67,18 +83,17 @@ def get_database_url() -> URL:
     )
 
 
-# Register SQLAlchemy model metadata here once our
-# database models have been implemented.
-target_metadata = None
+# Alembic now knows about all five database tables.
+target_metadata = Base.metadata
 
 
 def run_migrations_offline() -> None:
-    """Configure migrations without a database connection."""
-
-    url = get_database_url()
+    """Configure SQL migrations without connecting."""
 
     context.configure(
-        url=url.render_as_string(hide_password=False),
+        url=get_database_url().render_as_string(
+            hide_password=False
+        ),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -89,7 +104,7 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
-    """Run migrations using the PostgreSQL connection."""
+    """Configure migrations using a live PostgreSQL connection."""
 
     engine = create_engine(
         get_database_url(),
