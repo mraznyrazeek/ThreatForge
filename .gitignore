@@ -1,0 +1,74 @@
+
+# ==========================================
+# Git Ignore Configuration
+# ==========================================
+
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# .NET / C#
+**/bin/
+**/obj/
+*.user
+*.suo
+TestResults/
+coverage/
+appsettings.Local.json
+appsettings.Development.local.json
+
+# Node.js / React
+node_modules/
+.npm/
+.vite/
+.next/
+*.tsbuildinfo
+
+# Local databases and runtime data
+*.db
+*.sqlite
+*.sqlite3
+data/raw/
+data/processed/
+*.log
+logs/
+
+# Docker local overrides
+docker-compose.override.yml
+compose.override.yaml
+
+# IDE and OS
+.vs/
+.idea/
+.DS_Store
+Thumbs.db
+
+# VS Code local settings
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
