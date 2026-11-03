@@ -1,40 +1,35 @@
 
 """
-ThreatForge - ThreatFox Batch Ingestion with Run Tracking
+ThreatForge - Controlled ThreatFox Batch Ingestion
 
 Pipeline:
     ThreatFox API
         -> Pydantic normalization
         -> PostgreSQL observation persistence
-        -> Ingestion run lifecycle tracking
+        -> Ingestion-run lifecycle tracking
 
 Features:
 - Dry run by default.
 - Explicit --execute required for database writes.
-- Maximum initial batch size of 10 records.
-- Verify development database identity.
-- Report inserted, updated, and unchanged observations.
-- Persist ingestion run start/completion/failure.
-- Record received, normalized, and rejected counts.
-- Store only approved operational failure categories.
+- Initial batches limited to 10 records.
+- Verified development database destination.
+- Inserted, updated, and unchanged classifications.
+- Transactional observation persistence.
+- Observation-to-ingestion-run linkage.
+- Ingestion-run completion and failure tracking.
+- Safe aggregate operational diagnostics.
 
-Processing counts:
-    records_received:
-        Number of API records selected for this batch.
+The latest_ingestion_run_id is updated for every
+successfully processed observation, including unchanged
+intelligence records.
 
-    records_normalized:
-        Number of records successfully normalized.
+The database trigger preserves updated_at when only
+the ingestion-run linkage changes.
 
-    records_rejected:
-        Number of records rejected by normalization.
+Observation history and rejected-record persistence
+will be implemented in subsequent steps.
 
-Persistence failures are reported separately and cause
-the ingestion run to finish with status='failed'.
-
-Observation history, rejected-record storage, and
-latest_ingestion_run_id updates are future steps.
-
-No raw IOC values or credentials are printed.
+No raw IOC values or API credentials are printed.
 """
 
 import argparse
@@ -45,11 +40,17 @@ from collections import Counter
 from pathlib import Path
 
 import requests
+
 from dotenv import load_dotenv
+
 from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL, Engine
+from sqlalchemy.engine import Engine, URL
 from sqlalchemy.exc import SQLAlchemyError
 
+
+# ---------------------------------------------------------
+# Project paths
+# ---------------------------------------------------------
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -57,6 +58,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(SRC_DIR / "collectors"))
 sys.path.insert(0, str(SRC_DIR / "models"))
 sys.path.insert(0, str(SRC_DIR / "processing"))
+
 
 from threatfox_collector import (  # noqa: E402
     fetch_recent_iocs,
@@ -69,9 +71,9 @@ from persist_observation import persist_observation  # noqa: E402
 
 from ingestion_run_service import (  # noqa: E402
     IngestionFailureCategory,
-    start_ingestion_run,
     complete_ingestion_run,
     fail_ingestion_run,
+    start_ingestion_run,
 )
 
 
@@ -91,7 +93,7 @@ SUCCESS_ACTIONS = (
 # ---------------------------------------------------------
 
 def parse_arguments():
-    """Parse controlled ingestion options."""
+    """Parse controlled ingestion arguments."""
 
     parser = argparse.ArgumentParser(
         description="Controlled ThreatFox batch ingestion"
@@ -108,13 +110,13 @@ def parse_arguments():
         "--limit",
         type=int,
         default=10,
-        help="Maximum API records to process (1-10)",
+        help="Maximum records to process (1-10)",
     )
 
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="Enable PostgreSQL writes and run tracking",
+        help="Enable PostgreSQL persistence and run tracking",
     )
 
     args = parser.parse_args()
@@ -124,7 +126,7 @@ def parse_arguments():
 
     if not 1 <= args.limit <= MAX_INITIAL_BATCH_SIZE:
         parser.error(
-            f"--limit must be between 1 and "
+            "Batch limit must be between 1 and "
             f"{MAX_INITIAL_BATCH_SIZE}"
         )
 
@@ -136,7 +138,11 @@ def parse_arguments():
 # ---------------------------------------------------------
 
 def build_database_url() -> URL:
-    """Build the development database connection URL."""
+    """
+    Build the development database URL.
+
+    Explicit environment variables override .env defaults.
+    """
 
     load_dotenv(
         PROJECT_ROOT / ".env",
@@ -167,7 +173,7 @@ def build_database_url() -> URL:
 
 
 def create_verified_engine() -> Engine:
-    """Verify the real database before enabling writes."""
+    """Connect and verify the actual database identity."""
 
     engine = create_engine(
         build_database_url(),
@@ -196,8 +202,11 @@ def create_verified_engine() -> Engine:
 # ThreatFox collection
 # ---------------------------------------------------------
 
-def collect_batch(days: int, limit: int):
-    """Fetch recent records and return a limited selection."""
+def collect_batch(
+    days: int,
+    limit: int,
+) -> tuple[list[dict], int]:
+    """Fetch and select a limited batch of ThreatFox records."""
 
     api_key, api_url = load_configuration()
 
@@ -214,7 +223,7 @@ def collect_batch(days: int, limit: int):
 
     if response.get("query_status") != "ok":
         raise ValueError(
-            "ThreatFox returned non-OK query status"
+            "ThreatFox returned a non-OK query status"
         )
 
     records = response.get("data")
@@ -224,31 +233,38 @@ def collect_batch(days: int, limit: int):
             "ThreatFox response data must be a list"
         )
 
-    selected = records[:limit]
+    selected_records = records[:limit]
 
     if any(
         not isinstance(record, dict)
-        for record in selected
+        for record in selected_records
     ):
         raise ValueError(
-            "Selected records contain non-object entries"
+            "Selected batch contains non-object records"
         )
 
-    return selected, len(records)
+    return selected_records, len(records)
 
 
 # ---------------------------------------------------------
-# Observation persistence
+# Observation persistence with run linkage
 # ---------------------------------------------------------
 
-def persist_batch(engine: Engine, observations):
+def persist_batch(
+    engine: Engine,
+    observations: list,
+    ingestion_run_id: int,
+) -> Counter:
     """
-    Persist validated observations individually.
+    Persist observations and link them to an active run.
 
-    Each observation is committed separately by the
-    existing persistence service.
+    Each persistence operation manages its own transaction.
 
-    Partial failures do not roll back earlier successes.
+    The ingestion-run reference is saved atomically with
+    the observation insertion or metadata update.
+
+    A failure on one observation does not roll back
+    previously committed observations.
     """
 
     counts = Counter({
@@ -264,11 +280,12 @@ def persist_batch(engine: Engine, observations):
             result = persist_observation(
                 engine=engine,
                 observation=observation,
+                ingestion_run_id=ingestion_run_id,
             )
 
             if result.action not in SUCCESS_ACTIONS:
                 raise RuntimeError(
-                    "Unknown persistence action"
+                    "Unexpected persistence action"
                 )
 
             counts[result.action] += 1
@@ -282,8 +299,10 @@ def persist_batch(engine: Engine, observations):
     return counts
 
 
-def print_persistence_results(counts: Counter):
-    """Display persistence totals without IOC values."""
+def print_persistence_results(
+    counts: Counter,
+) -> tuple[int, int]:
+    """Print aggregate persistence results."""
 
     print("\n=== POSTGRESQL PERSISTENCE RESULTS ===")
 
@@ -292,12 +311,12 @@ def print_persistence_results(counts: Counter):
     print(f"Unchanged observations: {counts['unchanged']}")
 
     print(
-        f"Source identity conflicts: "
+        "Source identity conflicts: "
         f"{counts['identity_conflicts']}"
     )
 
     print(
-        f"Database failures: "
+        "Database failures: "
         f"{counts['database_failures']}"
     )
 
@@ -315,11 +334,16 @@ def print_persistence_results(counts: Counter):
 
 
 # ---------------------------------------------------------
-# Ingestion-run failure reporting
+# Failure classification
 # ---------------------------------------------------------
 
-def classify_failure(phase: str):
-    """Map the processing phase to an approved category."""
+def classify_failure(
+    phase: str,
+) -> IngestionFailureCategory:
+    """Return an approved operational failure category."""
+
+    if phase == "configuration":
+        return IngestionFailureCategory.CONFIGURATION_FAILURE
 
     if phase == "collection":
         return IngestionFailureCategory.API_FAILURE
@@ -340,13 +364,14 @@ def record_failed_run(
     received: int,
     normalized: int,
     rejected: int,
-):
+) -> None:
     """
-    Attempt to mark a started run as failed.
+    Attempt to finalize an unsuccessful ingestion run.
 
-    The failure update has its own transaction.
-    If PostgreSQL is unavailable, do not conceal
-    the original ingestion failure.
+    Use only approved error categories.
+
+    Do not store raw exception text, provider responses,
+    API credentials, or IOC values.
     """
 
     if engine is None or run_id is None:
@@ -372,9 +397,10 @@ def record_failed_run(
             "Could not finalize failed ingestion run: "
             f"{type(exc).__name__}"
         )
+
         print(
-            "The run may remain in 'running' status "
-            "and require operational reconciliation."
+            "The run may remain in running status "
+            "and require reconciliation."
         )
 
 
@@ -403,7 +429,6 @@ def main() -> int:
 
     engine = None
     run_id = None
-
     phase = "configuration"
 
     received_count = 0
@@ -411,8 +436,7 @@ def main() -> int:
     rejected_count = 0
 
     try:
-        # Create a run only in execution mode.
-        # Dry runs never create database records.
+        # 1. Start an ingestion run only in execute mode.
 
         if args.execute:
             engine = create_verified_engine()
@@ -432,7 +456,7 @@ def main() -> int:
             print(f"Run ID: {run_id}")
             print(f"Status: {started.status}")
 
-        # 1. Collect records.
+        # 2. Collect ThreatFox records.
 
         phase = "collection"
 
@@ -447,7 +471,7 @@ def main() -> int:
         print(f"API records available: {total_available}")
         print(f"Records selected: {received_count}")
 
-        # 2. Normalize selected records.
+        # 3. Normalize selected records.
 
         phase = "normalization"
 
@@ -462,17 +486,16 @@ def main() -> int:
             }
 
         normalized_count = len(observations)
-
-        rejected_count = (
-            received_count - normalized_count
-        )
+        rejected_count = received_count - normalized_count
 
         print("\n=== NORMALIZATION RESULTS ===")
         print(
-            f"Successfully normalized: {normalized_count}"
+            "Successfully normalized: "
+            f"{normalized_count}"
         )
         print(
-            f"Rejected during normalization: {rejected_count}"
+            "Rejected during normalization: "
+            f"{rejected_count}"
         )
 
         for category, count in sorted(
@@ -482,7 +505,7 @@ def main() -> int:
                 f"Validation failure {category}: {count}"
             )
 
-        # Dry runs stop before persistence and run tracking.
+        # Dry runs do not write to PostgreSQL.
 
         if not args.execute:
             print("\n=== DRY RUN COMPLETE ===")
@@ -490,13 +513,14 @@ def main() -> int:
 
             return 0 if rejected_count == 0 else 2
 
-        # 3. Persist validated observations.
+        # 4. Persist and link observations to this run.
 
         phase = "persistence"
 
         counts = persist_batch(
             engine=engine,
             observations=observations,
+            ingestion_run_id=run_id,
         )
 
         successful, persistence_failures = (
@@ -510,15 +534,12 @@ def main() -> int:
         print(f"Successful persistence: {successful}")
         print(f"Persistence failures: {persistence_failures}")
 
-        # The current schema tracks normalized and
-        # normalization-rejected counts separately.
-        #
-        # A persistence failure marks the run as failed
-        # even if some records were successfully saved.
+        # Persistence failures cause the run to fail,
+        # even when other observations were committed.
+
+        phase = "finalization"
 
         if persistence_failures:
-            phase = "finalization"
-
             failed = fail_ingestion_run(
                 engine=engine,
                 run_id=run_id,
@@ -539,13 +560,10 @@ def main() -> int:
 
             return 2
 
-        # 4. Complete the ingestion run.
+        # 5. Finalize the successful run.
         #
-        # Normalization rejections are counted but do
-        # not automatically mean the pipeline failed.
-        # A run can complete with rejected input records.
-
-        phase = "finalization"
+        # Normalization-rejected records are counted.
+        # They do not automatically make the run fail.
 
         completed = complete_ingestion_run(
             engine=engine,
@@ -560,9 +578,18 @@ def main() -> int:
         print("\n=== INGESTION RUN TRACKING ===")
         print(f"Run ID: {completed.run_id}")
         print(f"Status: {completed.status}")
-        print(f"Records received: {completed.records_received}")
-        print(f"Records normalized: {completed.records_normalized}")
-        print(f"Records rejected: {completed.records_rejected}")
+        print(
+            "Records received: "
+            f"{completed.records_received}"
+        )
+        print(
+            "Records normalized: "
+            f"{completed.records_normalized}"
+        )
+        print(
+            "Records rejected: "
+            f"{completed.records_rejected}"
+        )
 
         print("\nControlled batch completed successfully.")
 
@@ -582,7 +609,6 @@ def main() -> int:
             normalized_count,
             rejected_count,
         )
-
         return 1
 
     except (ValueError, TypeError, KeyError) as exc:
@@ -599,7 +625,6 @@ def main() -> int:
             normalized_count,
             rejected_count,
         )
-
         return 1
 
     except SQLAlchemyError as exc:
@@ -616,15 +641,9 @@ def main() -> int:
             normalized_count,
             rejected_count,
         )
-
         return 1
 
     except Exception as exc:
-        # Unexpected exceptions must not silently leave
-        # successfully started runs unreported.
-        #
-        # Only the exception type is printed.
-
         print(
             "Unexpected ingestion failure: "
             f"{type(exc).__name__}"
@@ -638,7 +657,6 @@ def main() -> int:
             normalized_count,
             rejected_count,
         )
-
         return 1
 
     finally:
