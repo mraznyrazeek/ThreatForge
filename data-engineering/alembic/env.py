@@ -47,7 +47,7 @@ from database_models import Base  # noqa: E402
 
 load_dotenv(
     PROJECT_ROOT / ".env",
-    override=True,
+    override=False,
 )
 
 
