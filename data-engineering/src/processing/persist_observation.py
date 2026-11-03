@@ -5,16 +5,18 @@ ThreatForge - Threat Intelligence Observation Persistence
 Persists one validated SourceObservation to PostgreSQL.
 
 Responsibilities:
-- Register an intelligence source.
-- Calculate SHA-256 of the normalized indicator.
+- Register intelligence sources.
+- Calculate canonical indicator SHA-256 digests.
 - Deduplicate canonical indicators.
-- Verify digest identity against stored values.
-- Insert or update source observations.
-- Preserve timestamp quality classifications.
-- Execute all operations within one transaction.
+- Verify digest identity.
+- Insert new source observations.
+- Update observations only when metadata changes.
+- Leave identical observations unchanged.
+- Reject source-record identity conflicts.
+- Commit or roll back each operation atomically.
 
-Observation history, ingestion-run tracking, and
-bulk ingestion will be added in later steps.
+Observation history and ingestion-run tracking will
+be implemented in subsequent milestones.
 
 No external API requests are performed.
 """
@@ -24,42 +26,46 @@ import sys
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.engine import Engine
-
+from sqlalchemy.engine import Connection, Engine
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 
-sys.path.insert(
-    0,
-    str(SRC_DIR / "models"),
-)
+sys.path.insert(0, str(SRC_DIR / "models"))
 
 from threat_indicator import SourceObservation  # noqa: E402
 
 
+PersistenceAction = Literal["inserted", "updated", "unchanged"]
+
+
 @dataclass(frozen=True)
 class PersistenceResult:
-    """Identifiers of the successfully persisted record."""
+    """Result of a successful persistence operation."""
 
     source_id: int
     indicator_id: int
     observation_id: int
     indicator_sha256: str
+    action: PersistenceAction
 
 
 def calculate_indicator_digest(normalized_value: str) -> str:
-    """Calculate SHA-256 from a canonical UTF-8 value."""
+    """Calculate SHA-256 from normalized UTF-8 indicator text."""
 
     return hashlib.sha256(
         normalized_value.encode("utf-8")
     ).hexdigest()
 
 
-def get_or_create_source(connection, source_name: str) -> int:
-    """Register an intelligence provider if necessary."""
+def get_or_create_source(
+    connection: Connection,
+    source_name: str,
+) -> int:
+    """Return the existing or newly registered source ID."""
 
     connection.execute(
         text(
@@ -85,19 +91,24 @@ def get_or_create_source(connection, source_name: str) -> int:
 
 
 def get_or_create_indicator(
-    connection,
+    connection: Connection,
     indicator_type: str,
     normalized_value: str,
 ) -> tuple[int, str]:
     """
-    Deduplicate a canonical indicator by type and digest.
+    Resolve a canonical indicator by type and digest.
 
-    Verify the stored normalized value when a matching
-    digest exists to protect against unexpected collisions
-    or incorrect application-supplied digest values.
+    A matching digest must also have an identical
+    normalized value.
     """
 
     digest = calculate_indicator_digest(normalized_value)
+
+    parameters = {
+        "indicator_type": indicator_type,
+        "normalized_value": normalized_value,
+        "digest": digest,
+    }
 
     connection.execute(
         text(
@@ -118,11 +129,7 @@ def get_or_create_indicator(
             ) DO NOTHING
             """
         ),
-        {
-            "indicator_type": indicator_type,
-            "normalized_value": normalized_value,
-            "digest": digest,
-        },
+        parameters,
     )
 
     row = connection.execute(
@@ -134,10 +141,7 @@ def get_or_create_indicator(
               AND value_sha256 = :digest
             """
         ),
-        {
-            "indicator_type": indicator_type,
-            "digest": digest,
-        },
+        parameters,
     ).one()
 
     if row.normalized_value != normalized_value:
@@ -149,7 +153,11 @@ def get_or_create_indicator(
     return row.id, digest
 
 
-OBSERVATION_UPSERT = text(
+# ---------------------------------------------------------
+# Observation SQL
+# ---------------------------------------------------------
+
+OBSERVATION_INSERT = text(
     """
     INSERT INTO indicator_observations (
         source_id,
@@ -182,24 +190,80 @@ OBSERVATION_UPSERT = text(
     ON CONFLICT (
         source_id,
         source_record_id
-    )
-    DO UPDATE SET
-        threat_type = EXCLUDED.threat_type,
-        malware_family = EXCLUDED.malware_family,
-        confidence_level = EXCLUDED.confidence_level,
-        first_seen = EXCLUDED.first_seen,
-        last_seen = EXCLUDED.last_seen,
-        timestamp_quality = EXCLUDED.timestamp_quality,
-        reporter = EXCLUDED.reporter,
-        reference = EXCLUDED.reference,
-        tags = EXCLUDED.tags
-    WHERE indicator_observations.indicator_id =
-          EXCLUDED.indicator_id
+    ) DO NOTHING
     RETURNING id
     """
 ).bindparams(
     bindparam("tags", type_=JSONB()),
 )
+
+
+OBSERVATION_SELECT = text(
+    """
+    SELECT
+        id,
+        indicator_id,
+        threat_type,
+        malware_family,
+        confidence_level,
+        first_seen,
+        last_seen,
+        timestamp_quality,
+        reporter,
+        reference,
+        tags
+    FROM indicator_observations
+    WHERE source_id = :source_id
+      AND source_record_id = :source_record_id
+    FOR UPDATE
+    """
+)
+
+
+OBSERVATION_UPDATE = text(
+    """
+    UPDATE indicator_observations
+    SET
+        threat_type = :threat_type,
+        malware_family = :malware_family,
+        confidence_level = :confidence_level,
+        first_seen = :first_seen,
+        last_seen = :last_seen,
+        timestamp_quality = :timestamp_quality,
+        reporter = :reporter,
+        reference = :reference,
+        tags = :tags
+    WHERE id = :observation_id
+    RETURNING id
+    """
+).bindparams(
+    bindparam("tags", type_=JSONB()),
+)
+
+
+COMPARABLE_FIELDS = (
+    "threat_type",
+    "malware_family",
+    "confidence_level",
+    "first_seen",
+    "last_seen",
+    "timestamp_quality",
+    "reporter",
+    "reference",
+    "tags",
+)
+
+
+def observation_has_changed(
+    existing,
+    parameters: dict,
+) -> bool:
+    """Check source observation metadata for real changes."""
+
+    return any(
+        existing[field] != parameters[field]
+        for field in COMPARABLE_FIELDS
+    )
 
 
 def persist_observation(
@@ -209,18 +273,13 @@ def persist_observation(
     """
     Persist one validated source observation atomically.
 
-    The engine manages the database connection.
+    Returns:
+        inserted  - A new observation was stored.
+        updated   - Existing metadata changed.
+        unchanged - Existing metadata was identical.
 
-    A successful transaction creates or updates:
-    - Intelligence source
-    - Canonical threat indicator
-    - Source-specific observation
-
-    If an existing source_record_id points to a
-    different canonical indicator, the operation
-    fails rather than silently changing identity.
-
-    All database changes roll back on failure.
+    Existing source-record identities cannot silently
+    switch to another canonical indicator.
     """
 
     if not isinstance(observation, SourceObservation):
@@ -234,14 +293,10 @@ def persist_observation(
 
     with engine.begin() as connection:
 
-        # Step 1: Resolve source identity.
-
         source_id = get_or_create_source(
             connection,
             observation.source_name,
         )
-
-        # Step 2: Resolve canonical indicator identity.
 
         indicator_id, digest = get_or_create_indicator(
             connection,
@@ -249,42 +304,83 @@ def persist_observation(
             normalized_value,
         )
 
-        # Step 3: Insert or update the source observation.
+        parameters = {
+            "source_id": source_id,
+            "indicator_id": indicator_id,
+            "source_record_id": observation.source_record_id,
+            "threat_type": observation.threat_type,
+            "malware_family": observation.malware_family,
+            "confidence_level": observation.confidence_level,
+            "first_seen": observation.first_seen,
+            "last_seen": observation.last_seen,
+            "timestamp_quality": (
+                observation.timestamp_quality.value
+            ),
+            "reporter": observation.reporter,
+            "reference": observation.reference,
+            "tags": observation.tags,
+        }
 
-        observation_id = connection.execute(
-            OBSERVATION_UPSERT,
-            {
-                "source_id": source_id,
-                "indicator_id": indicator_id,
-                "source_record_id": (
-                    observation.source_record_id
-                ),
-                "threat_type": observation.threat_type,
-                "malware_family": observation.malware_family,
-                "confidence_level": (
-                    observation.confidence_level
-                ),
-                "first_seen": observation.first_seen,
-                "last_seen": observation.last_seen,
-                "timestamp_quality": (
-                    observation.timestamp_quality.value
-                ),
-                "reporter": observation.reporter,
-                "reference": observation.reference,
-                "tags": observation.tags,
-            },
+        # Try creating a new source observation first.
+        # A unique constraint prevents duplicate records.
+
+        inserted_id = connection.execute(
+            OBSERVATION_INSERT,
+            parameters,
         ).scalar_one_or_none()
 
-        if observation_id is None:
-            raise ValueError(
-                "Source record identity conflict: "
-                "an existing record references a "
-                "different canonical indicator"
-            )
+        if inserted_id is not None:
+            observation_id = inserted_id
+            action: PersistenceAction = "inserted"
+
+        else:
+            # Lock the existing row while comparing and
+            # potentially updating its metadata.
+            #
+            # This prevents concurrent writers from
+            # modifying this observation between the
+            # comparison and the update.
+
+            existing = connection.execute(
+                OBSERVATION_SELECT,
+                {
+                    "source_id": source_id,
+                    "source_record_id": (
+                        observation.source_record_id
+                    ),
+                },
+            ).mappings().one()
+
+            if existing["indicator_id"] != indicator_id:
+                raise ValueError(
+                    "Source record identity conflict: "
+                    "an existing record references a "
+                    "different canonical indicator"
+                )
+
+            observation_id = existing["id"]
+
+            if observation_has_changed(existing, parameters):
+                connection.execute(
+                    OBSERVATION_UPDATE,
+                    {
+                        **parameters,
+                        "observation_id": observation_id,
+                    },
+                ).scalar_one()
+
+                action = "updated"
+
+            else:
+                # No UPDATE statement is executed.
+                # The database updated_at trigger does
+                # not fire for unchanged observations.
+                action = "unchanged"
 
     return PersistenceResult(
         source_id=source_id,
         indicator_id=indicator_id,
         observation_id=observation_id,
         indicator_sha256=digest,
+        action=action,
     )
