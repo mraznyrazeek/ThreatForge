@@ -174,6 +174,21 @@ def test_context(engine):
                     ).scalars()
                 )
 
+                # Remove history before its parent observations.
+                connection.execute(
+                    text(
+                        """
+                        DELETE FROM observation_history
+                        WHERE observation_id IN (
+                            SELECT id
+                            FROM indicator_observations
+                            WHERE source_id = :source_id
+                        )
+                        """
+                    ),
+                    {"source_id": source_id},
+                )
+
                 connection.execute(
                     text(
                         """

@@ -2,26 +2,31 @@
 """
 ThreatForge - Threat Intelligence Observation Persistence
 
-Persists one validated SourceObservation to PostgreSQL.
+Persists validated SourceObservation objects to PostgreSQL.
 
 Responsibilities:
 - Register intelligence sources.
 - Calculate canonical indicator SHA-256 digests.
 - Deduplicate canonical indicators.
-- Verify stored digest identity.
+- Verify stored indicator identity.
 - Insert new source observations.
-- Update observations only when intelligence metadata changes.
-- Leave identical intelligence metadata unchanged.
-- Optionally link observations to a running ingestion run.
-- Verify ingestion-run source identity and lifecycle status.
-- Preserve updated_at for linkage-only updates.
+- Detect changes in intelligence metadata.
+- Preserve the previous observation state in history.
+- Update changed observations atomically with their history.
+- Avoid history entries for unchanged observations.
+- Optionally link observations to an active ingestion run.
+- Validate ingestion-run identity and lifecycle status.
+- Preserve updated_at on linkage-only changes.
 - Reject source-record identity conflicts.
-- Commit or roll back each operation atomically.
 
-Observation history and rejected-record persistence will
-be implemented in later steps.
+Observation history contains the PREVIOUS stored state.
+The ingestion_run_id on a history entry identifies the
+run that detected the change, when available.
 
-No external API requests are performed.
+History insertion and observation update share one
+database transaction.
+
+Rejected-record persistence is a separate future feature.
 """
 
 import hashlib
@@ -35,6 +40,10 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Connection, Engine
 
+
+# ---------------------------------------------------------
+# Project imports
+# ---------------------------------------------------------
 
 SRC_DIR = Path(__file__).resolve().parents[1]
 
@@ -65,11 +74,13 @@ class PersistenceResult:
 
 
 # ---------------------------------------------------------
-# Indicator identity
+# Canonical indicator identity
 # ---------------------------------------------------------
 
-def calculate_indicator_digest(normalized_value: str) -> str:
-    """Calculate SHA-256 from normalized UTF-8 indicator text."""
+def calculate_indicator_digest(
+    normalized_value: str,
+) -> str:
+    """Calculate a SHA-256 digest from normalized text."""
 
     return hashlib.sha256(
         normalized_value.encode("utf-8")
@@ -80,7 +91,7 @@ def get_or_create_source(
     connection: Connection,
     source_name: str,
 ) -> int:
-    """Return an existing or newly registered source ID."""
+    """Resolve an existing or new intelligence source."""
 
     connection.execute(
         text(
@@ -115,13 +126,15 @@ def get_or_create_indicator(
     normalized_value: str,
 ) -> tuple[int, str]:
     """
-    Resolve a canonical indicator by type and digest.
+    Resolve a canonical indicator using its type and digest.
 
-    A matching digest must also have an identical
-    normalized value.
+    Confirm that a matching digest represents the same
+    normalized indicator value.
     """
 
-    digest = calculate_indicator_digest(normalized_value)
+    digest = calculate_indicator_digest(
+        normalized_value
+    )
 
     parameters = {
         "indicator_type": indicator_type,
@@ -154,7 +167,9 @@ def get_or_create_indicator(
     row = connection.execute(
         text(
             """
-            SELECT id, normalized_value
+            SELECT
+                id,
+                normalized_value
             FROM threat_indicators
             WHERE indicator_type = :indicator_type
               AND value_sha256 = :digest
@@ -182,19 +197,19 @@ def validate_ingestion_run(
     source_id: int,
 ) -> None:
     """
-    Validate that an ingestion run:
-    - Exists.
-    - Belongs to the same intelligence source.
-    - Is still running.
+    Ensure the ingestion run exists, belongs to the
+    correct source, and is still running.
 
-    FOR SHARE protects the selected run from concurrent
-    status changes until the current transaction finishes.
+    FOR SHARE prevents a concurrent lifecycle update
+    from finalizing the run during this transaction.
     """
 
     row = connection.execute(
         text(
             """
-            SELECT source_id, status
+            SELECT
+                source_id,
+                status
             FROM ingestion_runs
             WHERE id = :run_id
             FOR SHARE
@@ -222,7 +237,7 @@ def validate_ingestion_run(
 
 
 # ---------------------------------------------------------
-# Observation SQL
+# Observation SQL statements
 # ---------------------------------------------------------
 
 OBSERVATION_INSERT = text(
@@ -326,6 +341,44 @@ OBSERVATION_LINK_RUN = text(
 )
 
 
+# ---------------------------------------------------------
+# Observation history SQL
+# ---------------------------------------------------------
+
+OBSERVATION_HISTORY_INSERT = text(
+    """
+    INSERT INTO observation_history (
+        observation_id,
+        ingestion_run_id,
+        snapshot
+    )
+    SELECT
+        id,
+        :ingestion_run_id,
+        jsonb_build_object(
+            'source_id', source_id,
+            'indicator_id', indicator_id,
+            'latest_ingestion_run_id',
+                latest_ingestion_run_id,
+            'source_record_id', source_record_id,
+            'threat_type', threat_type,
+            'malware_family', malware_family,
+            'confidence_level', confidence_level,
+            'first_seen', first_seen,
+            'last_seen', last_seen,
+            'timestamp_quality', timestamp_quality,
+            'reporter', reporter,
+            'reference', reference,
+            'tags', tags,
+            'updated_at', updated_at
+        )
+    FROM indicator_observations
+    WHERE id = :observation_id
+    RETURNING id
+    """
+)
+
+
 COMPARABLE_FIELDS = (
     "threat_type",
     "malware_family",
@@ -343,12 +396,41 @@ def observation_has_changed(
     existing,
     parameters: dict,
 ) -> bool:
-    """Check whether intelligence metadata has changed."""
+    """Compare intelligence metadata, excluding run linkage."""
 
     return any(
         existing[field] != parameters[field]
         for field in COMPARABLE_FIELDS
     )
+
+
+def preserve_previous_observation(
+    connection: Connection,
+    observation_id: int,
+    ingestion_run_id: int | None,
+) -> int:
+    """
+    Save the previous observation state to history.
+
+    The caller must already hold a row lock on the
+    observation and must update it in the same transaction.
+
+    Capture values directly from PostgreSQL, before the
+    metadata UPDATE executes.
+
+    A NULL ingestion_run_id is permitted for independent
+    persistence operations that do not belong to a run.
+    """
+
+    history_id = connection.execute(
+        OBSERVATION_HISTORY_INSERT,
+        {
+            "observation_id": observation_id,
+            "ingestion_run_id": ingestion_run_id,
+        },
+    ).scalar_one()
+
+    return history_id
 
 
 # ---------------------------------------------------------
@@ -361,27 +443,28 @@ def persist_observation(
     ingestion_run_id: int | None = None,
 ) -> PersistenceResult:
     """
-    Persist one validated source observation atomically.
-
-    Optional ingestion_run_id links the observation
-    to an active run belonging to the same source.
+    Persist one source observation atomically.
 
     Actions:
-        inserted:
-            A new observation was created.
 
-        updated:
-            Existing intelligence metadata changed.
+    inserted:
+        Create a new observation.
+        Do not create history.
 
-        unchanged:
-            Intelligence metadata was identical.
+    updated:
+        Save the previous state in observation_history,
+        then update the current metadata in the same
+        database transaction.
 
-    An unchanged observation may still have its latest
-    ingestion run updated. The PostgreSQL trigger
-    preserves updated_at for linkage-only updates.
+    unchanged:
+        Do not create history.
+        If a newer ingestion run was supplied, update
+        latest_ingestion_run_id only.
 
-    Calls without ingestion_run_id remain supported
-    for existing tests and independent persistence.
+    Existing calls without ingestion_run_id remain valid.
+
+    SQL errors and identity conflicts roll back the
+    transaction, including any history insertion.
     """
 
     if not isinstance(observation, SourceObservation):
@@ -405,14 +488,14 @@ def persist_observation(
 
     with engine.begin() as connection:
 
-        # 1. Resolve intelligence source.
+        # 1. Resolve the intelligence source.
 
         source_id = get_or_create_source(
             connection,
             observation.source_name,
         )
 
-        # 2. Validate the optional ingestion-run link.
+        # 2. Validate the active run, when supplied.
 
         if ingestion_run_id is not None:
             validate_ingestion_run(
@@ -421,7 +504,7 @@ def persist_observation(
                 source_id,
             )
 
-        # 3. Resolve canonical indicator identity.
+        # 3. Resolve the canonical indicator.
 
         indicator_id, digest = get_or_create_indicator(
             connection,
@@ -429,7 +512,7 @@ def persist_observation(
             normalized_value,
         )
 
-        # 4. Prepare validated observation values.
+        # 4. Prepare validated metadata.
 
         parameters = {
             "source_id": source_id,
@@ -449,7 +532,7 @@ def persist_observation(
             "tags": observation.tags,
         }
 
-        # 5. Attempt first-time insertion.
+        # 5. Attempt to insert a new observation.
 
         inserted_id = connection.execute(
             OBSERVATION_INSERT,
@@ -457,11 +540,13 @@ def persist_observation(
         ).scalar_one_or_none()
 
         if inserted_id is not None:
+
             observation_id = inserted_id
             action: PersistenceAction = "inserted"
 
         else:
-            # 6. Lock and inspect the existing observation.
+
+            # 6. Lock the existing observation.
 
             existing = connection.execute(
                 OBSERVATION_SELECT,
@@ -472,6 +557,9 @@ def persist_observation(
                     ),
                 },
             ).mappings().one()
+
+            # A source record cannot silently change
+            # its canonical indicator identity.
 
             if existing["indicator_id"] != indicator_id:
                 raise ValueError(
@@ -489,8 +577,17 @@ def persist_observation(
 
             if metadata_changed:
 
-                # 7A. Update intelligence metadata.
-                # Include the new run ID when supplied.
+                # 7A. Preserve the PREVIOUS intelligence
+                # state before changing the observation.
+                #
+                # Both SQL operations share engine.begin().
+                # An UPDATE failure also rolls back history.
+
+                preserve_previous_observation(
+                    connection=connection,
+                    observation_id=observation_id,
+                    ingestion_run_id=ingestion_run_id,
+                )
 
                 connection.execute(
                     OBSERVATION_UPDATE,
@@ -503,10 +600,16 @@ def persist_observation(
                 action = "updated"
 
             else:
-                # 7B. Intelligence metadata is unchanged.
+
+                # 7B. Metadata is unchanged.
                 #
-                # Update only the ingestion-run link
-                # when a different run was supplied.
+                # Update run linkage only when a different
+                # active run was supplied.
+                #
+                # Do not create a history entry.
+                #
+                # The PostgreSQL trigger preserves
+                # updated_at for this linkage-only update.
 
                 if (
                     ingestion_run_id is not None

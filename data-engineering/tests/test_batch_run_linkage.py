@@ -168,6 +168,22 @@ def batch_context(engine):
                     ).scalars()
                 )
 
+                # History records reference observations, so delete
+                # those child records before deleting their parents.
+                connection.execute(
+                    text(
+                        """
+                        DELETE FROM observation_history
+                        WHERE observation_id IN (
+                            SELECT id
+                            FROM indicator_observations
+                            WHERE source_id = :source_id
+                        )
+                        """
+                    ),
+                    {"source_id": source_id},
+                )
+
                 connection.execute(
                     text(
                         """

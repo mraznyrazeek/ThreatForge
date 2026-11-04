@@ -13,6 +13,12 @@ Runs only against threatforge_test_db.
 
 Synthetic records are removed after testing.
 
+Cleanup order:
+1. observation_history
+2. indicator_observations
+3. intelligence_sources
+4. orphaned threat_indicators
+
 Run:
     DB_NAME=threatforge_test_db \
     python -m pytest tests/test_persistence_actions.py -v
@@ -126,6 +132,10 @@ def test_observation(engine):
         yield observation
 
     finally:
+        # All cleanup operations share a transaction.
+        # Only records belonging to this test's unique
+        # synthetic intelligence source are selected.
+
         with engine.begin() as connection:
             source_id = connection.execute(
                 text(
@@ -139,6 +149,10 @@ def test_observation(engine):
             ).scalar_one_or_none()
 
             if source_id is not None:
+
+                # Capture associated indicator IDs before
+                # deleting their parent observations.
+
                 indicator_ids = list(
                     connection.execute(
                         text(
@@ -152,6 +166,34 @@ def test_observation(engine):
                     ).scalars()
                 )
 
+                # STEP 1:
+                # Delete history FIRST.
+                #
+                # observation_history.observation_id
+                # references indicator_observations.id.
+                #
+                # PostgreSQL prevents parent observations
+                # from being deleted while their history
+                # records still exist.
+
+                connection.execute(
+                    text(
+                        """
+                        DELETE FROM observation_history
+                        WHERE observation_id IN (
+                            SELECT id
+                            FROM indicator_observations
+                            WHERE source_id = :source_id
+                        )
+                        """
+                    ),
+                    {"source_id": source_id},
+                )
+
+                # STEP 2:
+                # Delete observations after history
+                # references have been removed.
+
                 connection.execute(
                     text(
                         """
@@ -161,6 +203,9 @@ def test_observation(engine):
                     ),
                     {"source_id": source_id},
                 )
+
+                # STEP 3:
+                # Remove the synthetic intelligence source.
 
                 connection.execute(
                     text(
@@ -172,12 +217,24 @@ def test_observation(engine):
                     {"source_id": source_id},
                 )
 
+                # STEP 4:
+                # Delete only orphaned indicators.
+                #
+                # An indicator might theoretically be
+                # referenced by another observation.
+                # Do not delete it in that situation.
+
                 for indicator_id in indicator_ids:
                     connection.execute(
                         text(
                             """
                             DELETE FROM threat_indicators
                             WHERE id = :indicator_id
+                              AND NOT EXISTS (
+                                  SELECT 1
+                                  FROM indicator_observations
+                                  WHERE indicator_id = :indicator_id
+                              )
                             """
                         ),
                         {"indicator_id": indicator_id},

@@ -163,6 +163,23 @@ def test_context(engine):
             ).scalar_one_or_none()
 
             if source_id is not None:
+                # History references observations.
+                # Delete history before the parent records.
+                connection.execute(
+                    text(
+                        """
+                        DELETE FROM observation_history
+                        WHERE observation_id IN (
+                            SELECT id
+                            FROM indicator_observations
+                            WHERE source_id = :source_id
+                        )
+                        """
+                    ),
+                    {"source_id": source_id},
+                )
+
+                # Now parent observations can be deleted.
                 connection.execute(
                     text(
                         """
