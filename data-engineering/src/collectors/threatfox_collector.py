@@ -1,5 +1,22 @@
-import json
+
+"""
+ThreatForge - ThreatFox Intelligence Collector
+
+Responsibilities:
+- Load ThreatFox API configuration.
+- Retrieve recent threat intelligence indicators.
+- Validate the basic API response structure.
+- Print safe collection statistics.
+
+Security:
+- Never print API keys.
+- Never print raw IOC values or response payloads.
+- Never expose API response bodies in error messages.
+- No PostgreSQL writes.
+"""
+
 import os
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -7,32 +24,49 @@ import requests
 from dotenv import load_dotenv
 
 
-def load_configuration() -> tuple[str, str]:
-    """
-    Load API configuration from the project root .env file.
-    """
-    env_path = Path(__file__).resolve().parents[3] / ".env"
-    load_dotenv(env_path)
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
-    api_key = os.getenv("THREATFOX_API_KEY")
-    api_url = os.getenv("THREATFOX_API_URL")
+
+def load_configuration() -> tuple[str, str]:
+    """Load ThreatFox configuration from the project root."""
+
+    env_path = PROJECT_ROOT / ".env"
+
+    # Use the current local .env credentials instead of
+    # potentially outdated inherited terminal variables.
+    load_dotenv(env_path, override=True)
+
+    api_key = os.getenv("THREATFOX_API_KEY", "").strip()
+    api_url = os.getenv("THREATFOX_API_URL", "").strip()
 
     if not api_key:
-        raise ValueError("THREATFOX_API_KEY is missing from .env")
+        raise ValueError("THREATFOX_API_KEY is missing")
 
     if not api_url:
-        raise ValueError("THREATFOX_API_URL is missing from .env")
+        raise ValueError("THREATFOX_API_URL is missing")
+
+    expected_url = "https://threatfox-api.abuse.ch/api/v1/"
+
+    if api_url != expected_url:
+        raise ValueError("Unexpected ThreatFox API URL")
 
     return api_key, api_url
 
 
-def fetch_recent_iocs(api_key: str, api_url: str, days: int = 1) -> dict[str, Any]:
-    """
-    Fetch recent IOCs from ThreatFox.
-    """
+def fetch_recent_iocs(
+    api_key: str,
+    api_url: str,
+    days: int = 1,
+) -> dict[str, Any]:
+    """Retrieve recent IOC records from ThreatFox."""
+
+    if not isinstance(days, int) or isinstance(days, bool) or days < 1:
+        raise ValueError("days must be a positive integer")
+
     headers = {
         "Auth-Key": api_key,
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
 
     payload = {
@@ -45,83 +79,112 @@ def fetch_recent_iocs(api_key: str, api_url: str, days: int = 1) -> dict[str, An
         headers=headers,
         json=payload,
         timeout=30,
+        allow_redirects=False,
     )
 
     response.raise_for_status()
-    return response.json()
+
+    data = response.json()
+
+    if not isinstance(data, dict):
+        raise ValueError("Unexpected ThreatFox response structure")
+
+    return data
 
 
 def print_response_summary(data: dict[str, Any]) -> None:
-    """
-    Print a high-level summary of the ThreatFox response.
-    """
-    print("\n=== ThreatFox Response Summary ===")
+    """Print aggregate collection statistics without IOC values."""
 
-    query_status = data.get("query_status")
-    print(f"Query status: {query_status}")
+    print("\n=== THREATFOX COLLECTION RESULTS ===")
+
+    status = data.get("query_status")
+    print(f"Query status: {status}")
 
     records = data.get("data", [])
 
     if not isinstance(records, list):
-        print("Unexpected response format: 'data' is not a list.")
-        return
+        raise ValueError("ThreatFox data must be a list")
 
-    print(f"IOC records returned: {len(records)}")
+    print(f"Total IOC records returned: {len(records)}")
+
+    if status != "ok":
+        raise ValueError("ThreatFox returned non-OK status")
 
     if not records:
-        print("No IOC records were returned.")
+        print("No IOC records returned.")
         return
 
-    print("\n=== Sample IOC Records (first 3) ===")
+    indicator_types = Counter(
+        str(record.get("ioc_type", "unknown"))
+        for record in records
+        if isinstance(record, dict)
+    )
 
-    for index, record in enumerate(records[:3], start=1):
-        print(f"\nRecord {index}")
-        print("-" * 40)
-        print(f"IOC ID: {record.get('id')}")
-        print(f"IOC: {record.get('ioc')}")
-        print(f"IOC Type: {record.get('ioc_type')}")
-        print(f"Threat Type: {record.get('threat_type')}")
-        print(f"Malware: {record.get('malware')}")
-        print(f"Confidence Level: {record.get('confidence_level')}")
-        print(f"First Seen: {record.get('first_seen')}")
-        print(f"Last Seen: {record.get('last_seen')}")
-        print(f"Reporter: {record.get('reporter')}")
+    print("\n=== INDICATOR TYPE DISTRIBUTION ===")
 
+    for indicator_type, count in indicator_types.most_common():
+        print(f"{indicator_type}: {count}")
 
-def print_raw_keys(data: dict[str, Any]) -> None:
-    """
-    Print top-level keys and sample record keys for schema inspection.
-    """
-    print("\n=== Response Structure Inspection ===")
-    print("Top-level keys:", list(data.keys()))
+    print("\n=== RESPONSE STRUCTURE VALIDATION ===")
 
-    records = data.get("data", [])
-    if isinstance(records, list) and records:
-        print("\nKeys in the first IOC record:")
-        print(list(records[0].keys()))
+    required_fields = (
+        "id",
+        "ioc",
+        "ioc_type",
+        "threat_type",
+        "confidence_level",
+        "first_seen",
+    )
+
+    sample = records[:5]
+
+    print(f"Records inspected: {len(sample)}")
+
+    for field in required_fields:
+        present = sum(
+            isinstance(record, dict)
+            and record.get(field) is not None
+            for record in sample
+        )
+
+        print(f"  {field}: {present}/{len(sample)} present")
+
+    print("\nNo raw IOC values or API keys were printed.")
 
 
 def main() -> None:
+    print("=== THREATFORGE THREATFOX COLLECTOR ===")
+
     try:
         api_key, api_url = load_configuration()
-        data = fetch_recent_iocs(api_key, api_url, days=1)
+
+        print("API configuration: loaded")
+        print("Authentication key: present")
+        print("Database writes: disabled")
+
+        data = fetch_recent_iocs(
+            api_key=api_key,
+            api_url=api_url,
+            days=1,
+        )
 
         print_response_summary(data)
-        print_raw_keys(data)
 
-        print("\n=== Full Raw Response Preview ===")
-        print(json.dumps(data, indent=2)[:3000])
+        print("\nThreatFox collection completed successfully.")
 
-    except requests.exceptions.Timeout:
-        print("Request timed out while contacting ThreatFox.")
-    except requests.exceptions.HTTPError as exc:
-        print(f"HTTP error occurred: {exc}")
-    except requests.exceptions.RequestException as exc:
-        print(f"Request error occurred: {exc}")
-    except ValueError as exc:
-        print(f"Configuration error: {exc}")
-    except Exception as exc:
-        print(f"Unexpected error: {exc}")
+    except requests.RequestException as exc:
+        print(
+            "ThreatFox network/API request failed: "
+            f"{type(exc).__name__}"
+        )
+        raise SystemExit(1) from None
+
+    except (ValueError, TypeError, KeyError) as exc:
+        print(
+            "ThreatFox collection failed: "
+            f"{type(exc).__name__}"
+        )
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":
