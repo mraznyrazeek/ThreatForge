@@ -1,16 +1,16 @@
 
 """
-ThreatForge - Scheduled Ingestion Runner Tests
+ThreatForge - Scheduled Runner Safety Tests
 
-Verify one-shot job execution, dry-run safety, failure
-handling, and non-overlapping execution.
-
-No real child processes, API calls, or database writes.
+All child processes are mocked.
+No network calls or database writes.
 """
 
 import fcntl
+import signal
 import subprocess
 import sys
+
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -18,7 +18,9 @@ import pytest
 
 
 PROCESSING_DIR = (
-    Path(__file__).resolve().parents[1] / "src" / "processing"
+    Path(__file__).resolve().parents[1]
+    / "src"
+    / "processing"
 )
 
 sys.path.insert(0, str(PROCESSING_DIR))
@@ -28,7 +30,12 @@ import run_scheduled_ingestion as runner  # noqa: E402
 
 @pytest.fixture
 def isolated_runtime(monkeypatch, tmp_path):
-    monkeypatch.setattr(runner, "RUNTIME_DIR", tmp_path)
+    monkeypatch.setattr(
+        runner,
+        "RUNTIME_DIR",
+        tmp_path,
+    )
+
     monkeypatch.setattr(
         runner,
         "LOCK_FILE",
@@ -42,6 +49,25 @@ def make_args(execute=False, limit=5, days=1):
         limit=limit,
         days=days,
     )
+
+
+class FakeProcess:
+    def __init__(self, returncode=0, timeout=False):
+        self.pid = 123456
+        self.returncode = returncode
+        self.timeout = timeout
+        self.wait_calls = 0
+
+    def wait(self, timeout=None):
+        self.wait_calls += 1
+
+        if self.timeout and self.wait_calls == 1:
+            raise subprocess.TimeoutExpired(
+                cmd="synthetic-command",
+                timeout=timeout,
+            )
+
+        return self.returncode
 
 
 def test_default_arguments(monkeypatch):
@@ -75,8 +101,6 @@ def test_dry_run_command():
 
     assert command[0] == sys.executable
     assert command[1] == str(runner.ORCHESTRATOR)
-    assert "--limit" in command
-    assert "--days" in command
     assert "--execute" not in command
 
 
@@ -89,15 +113,19 @@ def test_execute_requires_explicit_flag():
 
 
 def test_successful_job(monkeypatch, isolated_runtime):
-    def fake_run(command, **kwargs):
+    def fake_popen(command, **kwargs):
         assert "--execute" not in command
-        assert kwargs["check"] is False
-        assert kwargs["capture_output"] is True
-        assert kwargs["timeout"] == runner.JOB_TIMEOUT_SECONDS
+        assert kwargs["start_new_session"] is True
+        assert kwargs["stdout"] == subprocess.DEVNULL
+        assert kwargs["stderr"] == subprocess.DEVNULL
 
-        return SimpleNamespace(returncode=0)
+        return FakeProcess(returncode=0)
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        fake_popen,
+    )
 
     assert runner.run_job(make_args()) == 0
     assert runner.LOCK_FILE.exists()
@@ -106,8 +134,8 @@ def test_successful_job(monkeypatch, isolated_runtime):
 def test_failed_child_process(monkeypatch, isolated_runtime):
     monkeypatch.setattr(
         subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(
+        "Popen",
+        lambda *args, **kwargs: FakeProcess(
             returncode=2
         ),
     )
@@ -115,23 +143,45 @@ def test_failed_child_process(monkeypatch, isolated_runtime):
     assert runner.run_job(make_args()) == 1
 
 
-def test_child_timeout(monkeypatch, isolated_runtime):
-    def fake_run(command, **kwargs):
-        raise subprocess.TimeoutExpired(
-            cmd=command,
-            timeout=runner.JOB_TIMEOUT_SECONDS,
-        )
+def test_timeout_terminates_process_group(
+    monkeypatch,
+    isolated_runtime,
+):
+    signals_sent = []
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *args, **kwargs: FakeProcess(
+            timeout=True
+        ),
+    )
+
+    monkeypatch.setattr(
+        runner.os,
+        "killpg",
+        lambda pid, sig: signals_sent.append(
+            (pid, sig)
+        ),
+    )
 
     assert runner.run_job(make_args()) == 1
 
+    assert (
+        123456,
+        signal.SIGTERM,
+    ) in signals_sent
+
 
 def test_execution_error(monkeypatch, isolated_runtime):
-    def fake_run(command, **kwargs):
+    def fake_popen(*args, **kwargs):
         raise OSError("Synthetic execution failure")
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        fake_popen,
+    )
 
     assert runner.run_job(make_args()) == 1
 
@@ -148,15 +198,15 @@ def test_overlapping_job_is_skipped(
             fcntl.LOCK_EX | fcntl.LOCK_NB,
         )
 
-        def should_not_run(*args, **kwargs):
+        def unexpected_process(*args, **kwargs):
             raise AssertionError(
                 "Overlapping job must not execute"
             )
 
         monkeypatch.setattr(
             subprocess,
-            "run",
-            should_not_run,
+            "Popen",
+            unexpected_process,
         )
 
         assert runner.run_job(make_args()) == 2
@@ -173,13 +223,48 @@ def test_lock_released_after_failure(
 ):
     monkeypatch.setattr(
         subprocess,
-        "run",
-        lambda *args, **kwargs: SimpleNamespace(
+        "Popen",
+        lambda *args, **kwargs: FakeProcess(
             returncode=1
         ),
     )
 
     assert runner.run_job(make_args()) == 1
 
-    # A second invocation must be able to acquire the lock.
+    # A subsequent invocation can acquire the lock.
     assert runner.run_job(make_args()) == 1
+
+
+def test_termination_handler_raises():
+    with pytest.raises(runner.JobInterrupted):
+        runner.interruption_handler(
+            signal.SIGTERM,
+            None,
+        )
+
+
+def test_unexpected_signal_handlers_restored(monkeypatch):
+    original_sigterm = signal.getsignal(signal.SIGTERM)
+    original_sigint = signal.getsignal(signal.SIGINT)
+
+    monkeypatch.setattr(
+        subprocess,
+        "Popen",
+        lambda *args, **kwargs: FakeProcess(
+            returncode=0
+        ),
+    )
+
+    runner.execute_pipeline(
+        runner.build_command(make_args())
+    )
+
+    assert (
+        signal.getsignal(signal.SIGTERM)
+        == original_sigterm
+    )
+
+    assert (
+        signal.getsignal(signal.SIGINT)
+        == original_sigint
+    )

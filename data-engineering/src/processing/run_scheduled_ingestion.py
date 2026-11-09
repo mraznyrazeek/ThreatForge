@@ -1,24 +1,28 @@
 
 """
-ThreatForge - Controlled Scheduled Ingestion Runner
+ThreatForge - Safe Scheduled Ingestion Runner
 
-One-shot job runner for macOS launchd or another scheduler.
+Runs the unified ingestion pipeline as one scheduled job.
 
-Features:
-- Calls the existing unified ingestion orchestrator.
+Safety:
 - Dry-run by default.
-- Requires --execute for PostgreSQL writes.
-- Prevents overlapping invocations using a file lock.
-- Enforces execution timeout.
-- Reports safe operational outcomes without raw IOC data.
+- Explicit --execute required for database writes.
+- Prevents overlapping scheduled jobs.
+- Runs child processes in an isolated process group.
+- Terminates the process group on timeout/interruption.
+- Never logs raw API responses, IOCs, or credentials.
+- Does not automatically modify stale ingestion runs.
 
-Scheduling is configured separately after validation.
+Designed for macOS launchd.
 """
 
 import argparse
 import fcntl
+import os
+import signal
 import subprocess
 import sys
+
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -35,6 +39,11 @@ LOCK_FILE = RUNTIME_DIR / "ingestion.lock"
 
 MAX_BATCH_SIZE = 10
 JOB_TIMEOUT_SECONDS = 300
+TERMINATION_GRACE_SECONDS = 10
+
+
+class JobInterrupted(Exception):
+    """Raised when the scheduler receives a stop signal."""
 
 
 def utc_now() -> str:
@@ -45,7 +54,7 @@ def utc_now() -> str:
 
 def parse_arguments():
     parser = argparse.ArgumentParser(
-        description="Run a controlled ThreatForge ingestion job"
+        description="Run scheduled ThreatForge ingestion"
     )
 
     parser.add_argument(
@@ -63,7 +72,7 @@ def parse_arguments():
     parser.add_argument(
         "--execute",
         action="store_true",
-        help="Enable database writes",
+        help="Enable PostgreSQL writes",
     )
 
     args = parser.parse_args()
@@ -93,7 +102,112 @@ def build_command(args):
     return command
 
 
+def terminate_process_group(process):
+    """
+    Stop the orchestrator and its descendant processes.
+
+    Because the orchestrator starts in a new process
+    session, its child ingestion scripts inherit that
+    session unless they deliberately detach.
+    """
+
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    try:
+        process.wait(
+            timeout=TERMINATION_GRACE_SECONDS
+        )
+    except subprocess.TimeoutExpired:
+        pass
+
+    # Terminate any remaining members of the same group.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+    process.wait()
+
+
+def interruption_handler(signum, frame):
+    raise JobInterrupted()
+
+
+def execute_pipeline(command):
+    """
+    Execute the pipeline with a process-group boundary.
+
+    Return a safe status and exit code.
+    """
+
+    previous_sigterm = signal.getsignal(signal.SIGTERM)
+    previous_sigint = signal.getsignal(signal.SIGINT)
+
+    process = None
+
+    try:
+        signal.signal(
+            signal.SIGTERM,
+            interruption_handler,
+        )
+
+        signal.signal(
+            signal.SIGINT,
+            interruption_handler,
+        )
+
+        process = subprocess.Popen(
+            command,
+            cwd=DATA_ENGINEERING_DIR,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+
+        try:
+            return_code = process.wait(
+                timeout=JOB_TIMEOUT_SECONDS
+            )
+
+        except subprocess.TimeoutExpired:
+            terminate_process_group(process)
+            return "timeout", 1
+
+        if return_code == 0:
+            return "success", 0
+
+        return "failed", return_code
+
+    except JobInterrupted:
+        if process is not None:
+            terminate_process_group(process)
+
+        return "interrupted", 1
+
+    except OSError:
+        if process is not None:
+            terminate_process_group(process)
+
+        return "execution_error", 1
+
+    finally:
+        signal.signal(
+            signal.SIGTERM,
+            previous_sigterm,
+        )
+
+        signal.signal(
+            signal.SIGINT,
+            previous_sigint,
+        )
+
+
 def run_job(args) -> int:
+    """Run one controlled and non-overlapping job."""
+
     RUNTIME_DIR.mkdir(
         parents=True,
         exist_ok=True,
@@ -106,54 +220,63 @@ def run_job(args) -> int:
                 lock.fileno(),
                 fcntl.LOCK_EX | fcntl.LOCK_NB,
             )
+
         except BlockingIOError:
             print("Status: skipped")
-            print("Reason: another ingestion job is running")
+            print(
+                "Reason: another ingestion job is running"
+            )
             return 2
 
-        print("=== THREATFORGE SCHEDULED INGESTION ===")
-        print(f"Started UTC: {utc_now()}")
-
-        print(
-            "Mode: "
-            + (
-                "EXECUTE"
-                if args.execute
-                else "DRY RUN"
-            )
-        )
-
-        command = build_command(args)
-
         try:
-            result = subprocess.run(
-                command,
-                cwd=DATA_ENGINEERING_DIR,
-                capture_output=True,
-                text=True,
-                timeout=JOB_TIMEOUT_SECONDS,
-                check=False,
+            print(
+                "=== THREATFORGE SCHEDULED INGESTION ===",
+                flush=True,
             )
 
-            if result.returncode == 0:
-                print("Status: success")
-                return 0
+            print(
+                f"Started UTC: {utc_now()}",
+                flush=True,
+            )
 
-            print("Status: failed")
-            print(f"Pipeline exit code: {result.returncode}")
-            return 1
+            print(
+                "Mode: "
+                + (
+                    "EXECUTE"
+                    if args.execute
+                    else "DRY RUN"
+                ),
+                flush=True,
+            )
 
-        except subprocess.TimeoutExpired:
-            print("Status: timeout")
-            return 1
+            command = build_command(args)
 
-        except OSError:
-            print("Status: execution_error")
-            return 1
+            status, return_code = execute_pipeline(
+                command
+            )
+
+            print(
+                f"Status: {status}",
+                flush=True,
+            )
+
+            print(
+                f"Pipeline exit code: {return_code}",
+                flush=True,
+            )
+
+            return 0 if status == "success" else 1
 
         finally:
-            print(f"Finished UTC: {utc_now()}")
-            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+            print(
+                f"Finished UTC: {utc_now()}",
+                flush=True,
+            )
+
+            fcntl.flock(
+                lock.fileno(),
+                fcntl.LOCK_UN,
+            )
 
 
 def main() -> int:
