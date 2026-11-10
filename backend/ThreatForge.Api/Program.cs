@@ -17,6 +17,22 @@ builder.Services.AddScoped<
     IThreatIndicatorService,
     ThreatIndicatorService>();
 
+builder.Services.AddScoped<
+    IIndicatorDistributionService,
+    IndicatorDistributionService>();
+
+builder.Services.AddScoped<
+    IMalwareFamilyService,
+    MalwareFamilyService>();
+
+builder.Services.AddScoped<
+    IDailyThreatActivityService,
+    DailyThreatActivityService>();
+
+builder.Services.AddScoped<
+    ICrossSourceCorrelationService,
+    CrossSourceCorrelationService>();
+
 // Register the PostgreSQL connection pool
 // Configuration comes from ASP.NET Core User Secrets
 // in the Development environment.
