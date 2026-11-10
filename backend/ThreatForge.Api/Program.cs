@@ -1,15 +1,19 @@
 
 using Npgsql;
+using ThreatForge.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// Register ASP.NET Core controllers.
+// Register ASP.NET Core controllers
 builder.Services.AddControllers();
 
-// Register OpenAPI documentation.
+// Register Swagger/OpenAPI services
 builder.Services.AddOpenApi();
+builder.Services.AddScoped<
+    IIntelligenceSummaryService,
+    IntelligenceSummaryService>();
 
-// Register the PostgreSQL connection pool.
+// Register the PostgreSQL connection pool
 // Configuration comes from ASP.NET Core User Secrets
 // in the Development environment.
 builder.Services.AddSingleton<NpgsqlDataSource>(
@@ -65,7 +69,7 @@ builder.Services.AddSingleton<NpgsqlDataSource>(
 
 var app = builder.Build();
 
-// Enable OpenAPI during development.
+// Enable OpenAPI during development
 if (app.Environment.IsDevelopment())
 {
     app.MapOpenApi();
@@ -76,7 +80,7 @@ app.MapControllers();
 
 app.Run();
 
-// Required by integration tests.
+// Required by integration tests
 public partial class Program
 {
 }
