@@ -13,6 +13,10 @@ builder.Services.AddScoped<
     IIntelligenceSummaryService,
     IntelligenceSummaryService>();
 
+builder.Services.AddScoped<
+    IThreatIndicatorService,
+    ThreatIndicatorService>();
+
 // Register the PostgreSQL connection pool
 // Configuration comes from ASP.NET Core User Secrets
 // in the Development environment.
