@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ThreatForge.Api.Models;
 using ThreatForge.Api.Services;
+using ThreatForge.Api.Tests.Security;
 using Xunit;
 
 namespace ThreatForge.Api.Tests;
@@ -28,6 +29,14 @@ public sealed class CrossSourceCorrelationEndpointTests
             {
                 builder.ConfigureTestServices(services =>
                 {
+                    // Authenticate integration test requests
+                    // using the test-only Analyst identity.
+                    // Production continues to use Keycloak JWTs.
+                    TestAuthenticationConfiguration
+                        .AddTestAuthentication(services);
+
+                    // Replace the PostgreSQL-backed correlation
+                    // service with deterministic test data.
                     services.RemoveAll<
                         ICrossSourceCorrelationService>();
 

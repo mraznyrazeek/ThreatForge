@@ -1,10 +1,12 @@
 
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace ThreatForge.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/health")]
+[AllowAnonymous]
 public sealed class HealthController : ControllerBase
 {
     [HttpGet]

@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ThreatForge.Api.Models;
 using ThreatForge.Api.Services;
+using ThreatForge.Api.Tests.Security;
 using Xunit;
 
 namespace ThreatForge.Api.Tests;
@@ -25,6 +26,14 @@ public sealed class ThreatIndicatorsEndpointTests
             {
                 builder.ConfigureTestServices(services =>
                 {
+                    // Authenticate integration test requests
+                    // using the test-only Analyst identity.
+                    // Production continues to use Keycloak JWTs.
+                    TestAuthenticationConfiguration
+                        .AddTestAuthentication(services);
+
+                    // Replace the PostgreSQL-backed service
+                    // with deterministic test data.
                     services.RemoveAll<IThreatIndicatorService>();
 
                     services.AddSingleton<IThreatIndicatorService>(
@@ -39,6 +48,7 @@ public sealed class ThreatIndicatorsEndpointTests
     public async Task GetIndicators_ReturnsHttp200()
     {
         var (factory, _) = CreateFactory();
+
         using (factory)
         using (var client = factory.CreateClient())
         {
@@ -55,6 +65,7 @@ public sealed class ThreatIndicatorsEndpointTests
     public async Task GetIndicators_ReturnsPaginationMetadata()
     {
         var (factory, _) = CreateFactory();
+
         using (factory)
         using (var client = factory.CreateClient())
         {
@@ -77,6 +88,7 @@ public sealed class ThreatIndicatorsEndpointTests
     public async Task GetIndicators_ForwardsTypeAndPagination()
     {
         var (factory, service) = CreateFactory();
+
         using (factory)
         using (var client = factory.CreateClient())
         {
@@ -104,6 +116,7 @@ public sealed class ThreatIndicatorsEndpointTests
         string query)
     {
         var (factory, service) = CreateFactory();
+
         using (factory)
         using (var client = factory.CreateClient())
         {
@@ -114,6 +127,7 @@ public sealed class ThreatIndicatorsEndpointTests
                 HttpStatusCode.BadRequest,
                 response.StatusCode);
 
+            // Invalid requests must not reach the service.
             Assert.Equal(0, service.CallCount);
         }
     }
@@ -122,6 +136,7 @@ public sealed class ThreatIndicatorsEndpointTests
     public async Task GetIndicators_LongType_Returns400()
     {
         var (factory, service) = CreateFactory();
+
         using (factory)
         using (var client = factory.CreateClient())
         {
@@ -164,6 +179,7 @@ public sealed class ThreatIndicatorsEndpointTests
     public async Task GetIndicators_SecondPageMetadata()
     {
         var (factory, _) = CreateFactory();
+
         using (factory)
         using (var client = factory.CreateClient())
         {
@@ -203,6 +219,7 @@ public sealed class ThreatIndicatorsEndpointTests
             LastIndicatorType = indicatorType;
 
             var total = ReturnEmpty ? 0L : 100L;
+
             var totalPages = total == 0
                 ? 0
                 : (total + pageSize - 1) / pageSize;

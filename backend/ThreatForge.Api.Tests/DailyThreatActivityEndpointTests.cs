@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ThreatForge.Api.Models;
 using ThreatForge.Api.Services;
+using ThreatForge.Api.Tests.Security;
 using Xunit;
 
 namespace ThreatForge.Api.Tests;
@@ -28,6 +29,14 @@ public sealed class DailyThreatActivityEndpointTests
             {
                 builder.ConfigureTestServices(services =>
                 {
+                    // Authenticate test requests using the
+                    // test-only Analyst identity.
+                    // Production uses Keycloak JWT authentication.
+                    TestAuthenticationConfiguration
+                        .AddTestAuthentication(services);
+
+                    // Replace database-backed services
+                    // with deterministic test implementations.
                     services.RemoveAll<
                         IDailyThreatActivityService>();
 

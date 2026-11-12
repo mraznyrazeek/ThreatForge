@@ -9,6 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using ThreatForge.Api.Models;
 using ThreatForge.Api.Services;
+using ThreatForge.Api.Tests.Security;
 using Xunit;
 
 namespace ThreatForge.Api.Tests;
@@ -23,6 +24,13 @@ public sealed class IntelligenceSummaryEndpointTests
             {
                 builder.ConfigureTestServices(services =>
                 {
+                    // Use a test-only authenticated Analyst.
+                    // Production continues to use Keycloak JWTs.
+                    TestAuthenticationConfiguration
+                        .AddTestAuthentication(services);
+
+                    // Replace the PostgreSQL service with
+                    // deterministic test data.
                     services.RemoveAll<
                         IIntelligenceSummaryService>();
 
@@ -101,7 +109,9 @@ public sealed class IntelligenceSummaryEndpointTests
             .GetProperty("generatedAtUtc")
             .GetDateTimeOffset();
 
-        Assert.Equal(TimeSpan.Zero, timestamp.Offset);
+        Assert.Equal(
+            TimeSpan.Zero,
+            timestamp.Offset);
 
         Assert.True(
             timestamp <= DateTimeOffset.UtcNow);

@@ -75,3 +75,5 @@ temp/
 
 # Local ingestion runtime files
 /data-engineering/.runtime/
+
+infrastructure/docker/.env.keycloak
