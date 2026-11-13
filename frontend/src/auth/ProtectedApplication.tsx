@@ -186,39 +186,7 @@ export function ProtectedApplication({
     )
   }
 
-  return (
-    <div>
-      <div className="flex min-h-11 flex-wrap items-center justify-between gap-3 border-b border-cyan-400/10 bg-[#101b26] px-5 py-2 text-xs text-slate-300 sm:px-8">
-        <span>
-          <span className="mr-2 inline-block h-2 w-2 rounded-full bg-emerald-400" />
-          Authenticated as{' '}
-          <strong className="text-white">
-            {username ?? 'Keycloak user'}
-          </strong>
-          <span className="ml-2 text-cyan-400">
-            ({roles.join(', ')})
-          </span>
-        </span>
-
-        <button
-          type="button"
-          onClick={() => void handleLogout()}
-          className="rounded-md border border-slate-600 px-3 py-1.5 text-xs font-medium text-white hover:border-cyan-400 hover:text-cyan-400"
-        >
-          Sign out
-        </button>
-      </div>
-
-      {actionError && (
-        <p
-          role="alert"
-          className="bg-red-500/10 px-5 py-3 text-sm text-red-300"
-        >
-          {actionError}
-        </p>
-      )}
-
-      {children}
-    </div>
-  )
+  
+  return <>{children}</>
 }
+
