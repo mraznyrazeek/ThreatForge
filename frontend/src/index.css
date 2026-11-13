@@ -1,47 +1,37 @@
 
+@import "@fontsource-variable/space-grotesk";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
 @import "tailwindcss";
 
-/* ==========================================
-   THREATFORGE — GLOBAL DESIGN TOKENS
-   ========================================== */
-
 :root {
-  font-family: Inter, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  font-family: "Space Grotesk Variable", sans-serif;
+  color: #e7e8ed;
+  background: #0e1015;
 
-  color: #c6d3e1;
-  background: #0b111a;
+  --font-display: "Space Grotesk Variable", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
 
-  --font-display: Inter, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif;
+  --bg: #0e1015;
+  --panel: #171a22;
+  --border: #2b303b;
 
-  --font-mono: "SFMono-Regular", Consolas,
-    "Liberation Mono", monospace;
+  --text: #e7e8ed;
+  --text-strong: #f4f4f6;
+  --text-muted: #9399a6;
 
-  --bg: #0b111a;
-  --panel: #131c27;
-  --border: #263240;
+  --accent: #a69acb;
+  --accent-hover: #c6b9ec;
+  --success: #79bba5;
+  --danger: #e18b91;
 
-  --text: #c6d3e1;
-  --text-strong: #f0f5fb;
-  --text-muted: #8192a6;
-
-  --cyan: #28cddb;
-  --blue: #4c8ff0;
-  --green: #2ed8a5;
-  --red: #ef5669;
-  --orange: #f6a254;
-  --yellow: #dfb951;
-
+  color-scheme: dark;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
-
-/* ==========================================
-   SHARED GLOBAL STYLES
-   ========================================== */
 
 * {
   box-sizing: border-box;
@@ -55,73 +45,63 @@ body {
   min-width: 320px;
   min-height: 100vh;
   margin: 0;
+  background: var(--bg);
+  color: var(--text);
 }
 
 body,
 button,
 input,
-select {
+select,
+textarea {
   font-family: inherit;
-}
-
-button,
-input,
-select {
-  font-size: inherit;
 }
 
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--accent);
   outline-offset: 3px;
 }
 
 button:disabled {
-  opacity: 0.5;
   cursor: not-allowed;
-}
-
-::selection {
-  background: rgba(40, 205, 219, 0.25);
-  color: #fff;
+  opacity: 0.55;
 }
 
 #root {
   min-height: 100vh;
 }
 
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
+::selection {
+  color: #fff;
+  background: #595074;
 }
 
-/* ==========================================
-   SCROLLBAR STYLING
-   ========================================== */
-
 ::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #0d151e;
+  background: #111319;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #304254;
-  border-radius: 10px;
+  background: #343947;
+  border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #40566a;
+  background: #4e5464;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
