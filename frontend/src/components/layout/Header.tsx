@@ -1,18 +1,26 @@
 
 import { useState } from 'react'
+
 import { useAuth } from '../../auth/useAuth'
+import type { AppPage } from '../../types/navigation'
+import { PAGE_TITLES } from '../../types/navigation'
 
 interface HeaderProps {
+  activePage: AppPage
   onMenuClick: () => void
 }
 
-export function Header({ onMenuClick }: HeaderProps) {
+export function Header({
+  activePage,
+  onMenuClick,
+}: HeaderProps) {
   const { username, roles, logout } = useAuth()
 
   const [signingOut, setSigningOut] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const displayName = username ?? 'User'
+
   const displayRole = roles.includes('administrator')
     ? 'Administrator'
     : roles.includes('analyst')
@@ -28,6 +36,10 @@ export function Header({ onMenuClick }: HeaderProps) {
     .toUpperCase()
 
   async function handleSignOut() {
+    if (signingOut) {
+      return
+    }
+
     setError(null)
     setSigningOut(true)
 
@@ -47,6 +59,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             type="button"
             onClick={onMenuClick}
             aria-label="Open navigation"
+            aria-controls="main-sidebar"
             className="flex h-8 w-8 items-center justify-center rounded-md border border-[#343844] text-[#C8C5D3] hover:bg-[#252833] lg:hidden"
           >
             <svg
@@ -63,9 +76,9 @@ export function Header({ onMenuClick }: HeaderProps) {
             </svg>
           </button>
 
-          <div className="flex items-center gap-2">
-            <span className="font-medium text-[13px] text-[#F0EDF5]">
-              Overview
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="truncate text-[13px] font-medium text-[#F0EDF5]">
+              {PAGE_TITLES[activePage]}
             </span>
 
             <span className="hidden rounded border border-[#35323F] bg-[#24212F] px-2 py-0.5 font-mono text-[9px] text-[#B2A4D6] sm:inline-flex">
@@ -76,7 +89,11 @@ export function Header({ onMenuClick }: HeaderProps) {
 
         <div className="flex shrink-0 items-center gap-3">
           <div className="hidden items-center gap-2 border-r border-[#353844] pr-4 sm:flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-[#79BBA5]" />
+            <span
+              aria-hidden="true"
+              className="h-1.5 w-1.5 rounded-full bg-[#79BBA5]"
+            />
+
             <span className="font-mono text-[10px] text-[#9499A7]">
               Session active
             </span>
@@ -86,6 +103,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             <p className="max-w-[180px] truncate text-[11px] font-semibold text-[#E6E3EB]">
               {displayName}
             </p>
+
             <p className="mt-0.5 text-[10px] text-[#8C90A0]">
               {displayRole}
             </p>
@@ -93,6 +111,7 @@ export function Header({ onMenuClick }: HeaderProps) {
 
           <div
             title={`${displayName} — ${displayRole}`}
+            aria-label={`${displayName}, ${displayRole}`}
             className="flex h-8 w-8 items-center justify-center rounded-md border border-[#554C67] bg-[#2B2638] text-[10px] font-semibold text-[#D3C7ED]"
           >
             {initials || 'TF'}
@@ -102,7 +121,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             type="button"
             disabled={signingOut}
             onClick={() => void handleSignOut()}
-            className="inline-flex h-8 items-center gap-2 rounded-md border border-[#3A3D48] bg-[#1C1E26] px-3 text-[11px] font-medium text-[#C6C7D1] transition-colors hover:border-[#8F81B8] hover:bg-[#2A2634] hover:text-white disabled:opacity-50"
+            className="inline-flex h-8 items-center gap-2 rounded-md border border-[#3A3D48] bg-[#1C1E26] px-3 text-[11px] font-medium text-[#C6C7D1] transition-colors hover:border-[#8F81B8] hover:bg-[#2A2634] hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
           >
             <svg
               width="14"
@@ -118,6 +137,7 @@ export function Header({ onMenuClick }: HeaderProps) {
               <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
               <path d="m16 17 5-5-5-5M21 12H9" />
             </svg>
+
             <span>
               {signingOut ? 'Signing out' : 'Sign out'}
             </span>
