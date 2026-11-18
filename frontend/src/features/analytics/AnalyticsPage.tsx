@@ -54,14 +54,15 @@ function AnalyticsPanel({
     return (
       <div
         role="status"
-        className="flex min-h-[240px] items-center justify-center gap-3 rounded-lg border border-[#30343F] bg-[#191C24] px-5 py-10"
+        className="flex min-h-[240px] items-center justify-center gap-3 rounded border border-[#2C5246] bg-[#101A1D] px-5 py-10"
       >
         <span
           aria-hidden="true"
-          className="h-5 w-5 animate-spin rounded-full border-2 border-[#50445F] border-t-[#BAA7E6]"
+          className="h-5 w-5 animate-spin rounded-full border-2 border-[#31594C] border-t-[#51E9B5]"
         />
-        <span className="font-mono text-xs text-[#A5A4B1]">
-          Loading intelligence analytics...
+
+        <span className="font-mono text-xs text-[#9EDAC1]">
+          RETRIEVING ANALYTICS DATA...
         </span>
       </div>
     )
@@ -71,12 +72,13 @@ function AnalyticsPanel({
     return (
       <div
         role="alert"
-        className="rounded-lg border border-[#69444F] bg-[#251C24] px-5 py-6"
+        className="rounded border border-[#794447] bg-[#2A191C] px-5 py-6"
       >
-        <p className="text-sm font-semibold text-[#F0ADB9]">
-          Analytics unavailable
+        <p className="font-mono text-xs font-semibold text-[#FFAAAA]">
+          ANALYTICS UNAVAILABLE
         </p>
-        <p className="mt-2 break-words text-xs leading-6 text-[#C7A7B0]">
+
+        <p className="mt-2 break-words text-xs leading-6 text-[#E2A4A8]">
           {error}
         </p>
       </div>
@@ -104,6 +106,7 @@ export function AnalyticsPage() {
   const [familyLimit, setFamilyLimit] = useState(15)
   const [refreshKey, setRefreshKey] = useState(0)
 
+  // Distribution and activity do not depend on familyLimit.
   useEffect(() => {
     const controller = new AbortController()
     let active = true
@@ -114,7 +117,6 @@ export function AnalyticsPage() {
     )
       .then((data) => {
         if (!active) return
-
         setDistribution({
           data,
           error: null,
@@ -123,32 +125,7 @@ export function AnalyticsPage() {
       })
       .catch((error: unknown) => {
         if (!active || controller.signal.aborted) return
-
         setDistribution({
-          data: null,
-          error: errorMessage(error),
-          loading: false,
-        })
-      })
-
-    getMalwareFamilies(
-      getAccessToken,
-      familyLimit,
-      controller.signal,
-    )
-      .then((data) => {
-        if (!active) return
-
-        setMalware({
-          data,
-          error: null,
-          loading: false,
-        })
-      })
-      .catch((error: unknown) => {
-        if (!active || controller.signal.aborted) return
-
-        setMalware({
           data: null,
           error: errorMessage(error),
           loading: false,
@@ -161,7 +138,6 @@ export function AnalyticsPage() {
     )
       .then((data) => {
         if (!active) return
-
         setDaily({
           data,
           error: null,
@@ -170,8 +146,40 @@ export function AnalyticsPage() {
       })
       .catch((error: unknown) => {
         if (!active || controller.signal.aborted) return
-
         setDaily({
+          data: null,
+          error: errorMessage(error),
+          loading: false,
+        })
+      })
+
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [getAccessToken, refreshKey])
+
+  // Ranking requests change independently of the other charts.
+  useEffect(() => {
+    const controller = new AbortController()
+    let active = true
+
+    getMalwareFamilies(
+      getAccessToken,
+      familyLimit,
+      controller.signal,
+    )
+      .then((data) => {
+        if (!active) return
+        setMalware({
+          data,
+          error: null,
+          loading: false,
+        })
+      })
+      .catch((error: unknown) => {
+        if (!active || controller.signal.aborted) return
+        setMalware({
           data: null,
           error: errorMessage(error),
           loading: false,
@@ -208,22 +216,29 @@ export function AnalyticsPage() {
       aria-labelledby="analytics-heading"
       className="space-y-5"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4">
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#29473D] pb-5">
         <div>
-          <p className="font-mono text-[10px] text-[#9295A3]">
-            Intelligence / Analytics
+          <p className="font-mono text-[10px] tracking-wide text-[#79BA9D]">
+            THREATFORGE / INTELLIGENCE / ANALYTICS
           </p>
 
-          <h1
-            id="analytics-heading"
-            className="mt-2 text-[25px] font-semibold tracking-[-0.04em] text-[#F1F0F5]"
-          >
-            Threat Intelligence Analytics
-          </h1>
+          <div className="mt-3 flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="h-7 w-[3px] rounded bg-[#51E9B5] shadow-[0_0_12px_rgba(81,233,181,0.3)]"
+            />
 
-          <p className="mt-1 text-xs text-[#989BA8]">
-            Indicator composition, malware intelligence,
-            and source activity.
+            <h1
+              id="analytics-heading"
+              className="text-[clamp(1.5rem,3vw,2rem)] font-semibold tracking-[-0.045em] text-[#E8FFF5]"
+            >
+              Threat Intelligence Analytics
+            </h1>
+          </div>
+
+          <p className="mt-2 text-xs text-[#8BAA9E]">
+            Indicator composition, malware intelligence, and
+            source activity
           </p>
         </div>
 
@@ -231,21 +246,24 @@ export function AnalyticsPage() {
           type="button"
           onClick={handleRefresh}
           disabled={loading}
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-[#4C455D] bg-[#292435] px-4 text-xs font-medium text-[#D5C8F2] transition-colors hover:border-[#A394CD] hover:bg-[#352E43] disabled:cursor-not-allowed disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded border border-[#398064] bg-[#143126] px-4 font-mono text-[10px] font-medium tracking-wide text-[#A2F1D0] transition-colors hover:border-[#6CE8B6] hover:bg-[#1B4433] disabled:opacity-50"
         >
           <span aria-hidden="true">↻</span>
-          {loading ? 'Loading...' : 'Refresh analytics'}
+          {loading ? 'UPDATING' : 'REFRESH ANALYTICS'}
         </button>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3 border-b border-[#30343F] pb-4">
-        <span className="inline-flex items-center gap-2 rounded-md border border-[#3A3F4B] bg-[#1A1D25] px-3 py-2 font-mono text-[10px] text-[#B8BBC8]">
-          <span className="h-1.5 w-1.5 rounded-full bg-[#72B5A6]" />
-          PostgreSQL-backed intelligence
+      <div className="flex flex-wrap items-center gap-3 rounded border border-[#274D40] bg-[#0D1B1A] px-4 py-3">
+        <span className="tf-status-dot" />
+
+        <span className="font-mono text-[10px] tracking-wide text-[#A2DBC0]">
+          POSTGRESQL-BACKED INTELLIGENCE
         </span>
 
-        <span className="font-mono text-[10px] text-[#8B909E]">
-          Data generated by ThreatForge analytics APIs
+        <span className="hidden h-4 w-px bg-[#315346] sm:block" />
+
+        <span className="font-mono text-[10px] text-[#719C8B]">
+          DATA SOURCE: THREATFORGE ANALYTICS API
         </span>
       </div>
 
@@ -271,25 +289,26 @@ export function AnalyticsPage() {
         </AnalyticsPanel>
 
         <div className="min-w-0 space-y-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-[#999CAC]">
-              Malware family ranking
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded border border-[#2C5246] bg-[#0D1A1B] px-4 py-3">
+            <span className="font-mono text-[10px] font-medium tracking-wider text-[#A4E7C8]">
+              // MALWARE FAMILY RANKING
             </span>
 
             <label className="flex items-center gap-2">
-              <span className="text-[11px] text-[#999CAC]">
-                Top families
+              <span className="font-mono text-[10px] text-[#83B6A4]">
+                TOP FAMILIES
               </span>
 
               <select
                 aria-label="Number of malware families"
                 value={familyLimit}
+                disabled={malware.loading}
                 onChange={(event) =>
                   handleFamilyLimitChange(
                     Number(event.target.value),
                   )
                 }
-                className="h-8 rounded-md border border-[#414552] bg-[#191C24] px-3 text-xs text-[#E1DCEB] focus:border-[#A999DF] focus:outline-none"
+                className="h-8 rounded border border-[#356450] bg-[#091713] px-3 font-mono text-[11px] text-[#C5F4DB] focus:border-[#51E9B5] focus:outline-none"
               >
                 <option value={5}>5</option>
                 <option value={10}>10</option>
@@ -305,17 +324,15 @@ export function AnalyticsPage() {
             error={malware.error}
           >
             {malware.data && (
-              <MalwareFamiliesChart
-                data={malware.data}
-              />
+              <MalwareFamiliesChart data={malware.data} />
             )}
           </AnalyticsPanel>
         </div>
       </div>
 
-      <p className="font-mono text-[10px] leading-5 text-[#777D8C]">
-        Counts represent observed intelligence records.
-        They do not independently establish threat
+      <p className="border-t border-[#29473D] pt-4 font-mono text-[10px] leading-6 text-[#779B8F]">
+        ANALYTICAL NOTE — Counts represent observed intelligence
+        records. They do not independently establish threat
         severity, confirmed attacks, or incident impact.
       </p>
     </section>

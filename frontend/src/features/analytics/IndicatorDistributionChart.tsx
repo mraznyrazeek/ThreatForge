@@ -21,14 +21,14 @@ interface IndicatorDistributionChartProps {
 }
 
 const COLORS = [
-  '#A999DF',
-  '#6DB9B2',
-  '#D6A46C',
-  '#829DD3',
-  '#C78DAF',
-  '#8EADC3',
-  '#A7A2B8',
-  '#C6BA8A',
+  '#51E9B5',
+  '#61D8EB',
+  '#F3B66A',
+  '#91A9FF',
+  '#E78FB0',
+  '#A3D4C4',
+  '#C4A4F3',
+  '#D5C18B',
 ]
 
 const numberFormatter = new Intl.NumberFormat('en-US')
@@ -57,9 +57,7 @@ export function IndicatorDistributionChart({
   useEffect(() => {
     const element = chartRef.current
 
-    if (!element || !hasData) {
-      return
-    }
+    if (!element || !hasData) return
 
     const chart = echarts.init(element, undefined, {
       renderer: 'svg',
@@ -67,21 +65,21 @@ export function IndicatorDistributionChart({
 
     chart.setOption({
       backgroundColor: 'transparent',
-
       color: COLORS,
-
       animationDuration: 650,
 
       tooltip: {
         trigger: 'item',
-        backgroundColor: '#222530',
-        borderColor: '#454153',
+        backgroundColor: '#0B1919',
+        borderColor: '#37725C',
         borderWidth: 1,
         padding: 12,
+
         textStyle: {
-          color: '#E8E5F0',
+          color: '#E4F9EF',
           fontSize: 12,
         },
+
         valueFormatter: (value: unknown) =>
           typeof value === 'number'
             ? `${numberFormatter.format(value)} indicators`
@@ -98,7 +96,7 @@ export function IndicatorDistributionChart({
           selectedMode: 'single',
 
           itemStyle: {
-            borderColor: '#191C24',
+            borderColor: '#101A1D',
             borderWidth: 3,
             borderRadius: 5,
           },
@@ -110,6 +108,7 @@ export function IndicatorDistributionChart({
           emphasis: {
             scale: true,
             scaleSize: 7,
+
             label: {
               show: false,
             },
@@ -123,14 +122,14 @@ export function IndicatorDistributionChart({
       ],
     })
 
-    const resizeObserver = new ResizeObserver(() => {
+    const observer = new ResizeObserver(() => {
       chart.resize()
     })
 
-    resizeObserver.observe(element)
+    observer.observe(element)
 
     return () => {
-      resizeObserver.disconnect()
+      observer.disconnect()
       chart.dispose()
     }
   }, [distribution, hasData])
@@ -138,36 +137,40 @@ export function IndicatorDistributionChart({
   return (
     <section
       aria-labelledby="distribution-heading"
-      className="overflow-hidden rounded-lg border border-[#30343F] bg-[#191C24]"
+      className="tf-glow-border overflow-hidden rounded border border-[#2C5749] bg-[#101A1D]"
     >
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#30343F] px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#294A40] bg-[#0D1A1B] px-5 py-4">
         <div>
+          <p className="font-mono text-[10px] tracking-wider text-[#6FB89A]">
+            // IOC COMPOSITION
+          </p>
+
           <h2
             id="distribution-heading"
-            className="text-sm font-semibold text-[#EEEAF5]"
+            className="mt-1 text-sm font-semibold text-[#DDF8EB]"
           >
             Indicator distribution
           </h2>
 
-          <p className="mt-1 text-xs text-[#9296A4]">
+          <p className="mt-1 text-xs text-[#8CAFA2]">
             Canonical indicators by IOC type
           </p>
         </div>
 
         <div className="text-right">
-          <p className="font-mono text-[10px] uppercase tracking-wider text-[#9296A4]">
-            Total indicators
+          <p className="tf-terminal-label">
+            TOTAL INDICATORS
           </p>
 
-          <p className="mt-1 font-mono text-xl font-semibold tabular-nums text-[#EEEAF5]">
+          <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-[#70EFC0]">
             {numberFormatter.format(data.totalIndicators)}
           </p>
         </div>
       </div>
 
       {!hasData ? (
-        <div className="px-5 py-16 text-center text-sm text-[#9296A4]">
-          No indicator distribution data available.
+        <div className="px-5 py-16 text-center font-mono text-xs text-[#88AD9D]">
+          NO INDICATOR DISTRIBUTION DATA AVAILABLE
         </div>
       ) : (
         <div className="grid gap-5 p-5 xl:grid-cols-[minmax(240px,0.9fr)_minmax(0,1.1fr)]">
@@ -180,32 +183,32 @@ export function IndicatorDistributionChart({
             />
 
             <div className="pointer-events-none absolute flex flex-col items-center justify-center">
-              <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-[#9296A4]">
-                IOC Types
+              <span className="font-mono text-[10px] tracking-[0.15em] text-[#80B5A1]">
+                IOC TYPES
               </span>
 
-              <span className="mt-1 text-3xl font-semibold tracking-tight text-[#F0EDF6]">
+              <span className="mt-1 font-mono text-3xl font-semibold text-[#DFFFEF]">
                 {distribution.length}
               </span>
 
-              <span className="mt-1 font-mono text-[10px] text-[#9495A5]">
-                Categories
+              <span className="mt-1 font-mono text-[10px] text-[#739E8E]">
+                CATEGORIES
               </span>
             </div>
           </div>
 
           <div className="min-w-0">
-            <div className="mb-3 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-b border-[#30343F] pb-3 font-mono text-[10px] uppercase tracking-wider text-[#7F8493]">
-              <span>Indicator type</span>
-              <span className="text-right">Count</span>
-              <span className="w-14 text-right">Share</span>
+            <div className="mb-3 grid grid-cols-[minmax(0,1fr)_auto_auto] gap-3 border-b border-[#294A40] pb-3 font-mono text-[10px] tracking-wider text-[#83B6A4]">
+              <span>INDICATOR TYPE</span>
+              <span className="text-right">COUNT</span>
+              <span className="w-14 text-right">SHARE</span>
             </div>
 
             <div className="space-y-1">
               {distribution.map((item, index) => (
                 <div
                   key={item.indicatorType}
-                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded-md px-2 py-2.5 transition-colors hover:bg-[#252832]"
+                  className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 rounded px-2 py-2.5 transition-colors hover:bg-[#173028]"
                 >
                   <div className="flex min-w-0 items-center gap-3">
                     <span
@@ -219,17 +222,17 @@ export function IndicatorDistributionChart({
 
                     <span
                       title={item.indicatorType}
-                      className="truncate font-mono text-[11px] text-[#D8D6E2]"
+                      className="truncate font-mono text-[11px] text-[#CDEBDE]"
                     >
                       {item.indicatorType}
                     </span>
                   </div>
 
-                  <span className="text-right font-mono text-[11px] tabular-nums text-[#EBE8F2]">
+                  <span className="text-right font-mono text-[11px] tabular-nums text-[#E1F9EC]">
                     {numberFormatter.format(item.count)}
                   </span>
 
-                  <span className="w-14 text-right font-mono text-[11px] tabular-nums text-[#B8A7E1]">
+                  <span className="w-14 text-right font-mono text-[11px] tabular-nums text-[#75E5B6]">
                     {formatPercentage(item.percentage)}
                   </span>
                 </div>
@@ -239,16 +242,16 @@ export function IndicatorDistributionChart({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#30343F] px-5 py-3">
-        <span className="font-mono text-[10px] text-[#858A98]">
-          Source: ThreatForge intelligence database
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[#294A40] bg-[#0D1A1B] px-5 py-3">
+        <span className="font-mono text-[10px] text-[#789E8E]">
+          SOURCE: THREATFORGE INTELLIGENCE DATABASE
         </span>
 
         <time
           dateTime={data.generatedAtUtc}
-          className="font-mono text-[10px] text-[#858A98]"
+          className="font-mono text-[10px] text-[#789E8E]"
         >
-          Generated:{' '}
+          GENERATED{' '}
           {new Date(data.generatedAtUtc).toLocaleString()}
         </time>
       </div>

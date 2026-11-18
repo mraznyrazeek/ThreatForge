@@ -7,26 +7,36 @@
 
 :root {
   font-family: "Space Grotesk Variable", sans-serif;
-  color: #e7e8ed;
-  background: #0e1015;
 
   --font-display: "Space Grotesk Variable", sans-serif;
   --font-mono: "IBM Plex Mono", monospace;
 
-  --bg: #0e1015;
-  --panel: #171a22;
-  --border: #2b303b;
+  /* ThreatForge cyber command-center palette */
+  --bg: #080e11;
+  --bg-deep: #050a0c;
+  --sidebar: #0b1316;
+  --panel: #101a1e;
+  --panel-elevated: #142126;
+  --border: #243a3c;
+  --border-strong: #35625b;
 
-  --text: #e7e8ed;
-  --text-strong: #f4f4f6;
-  --text-muted: #9399a6;
+  --text: #d3e8e2;
+  --text-strong: #effff9;
+  --text-muted: #8aa6a0;
 
-  --accent: #a69acb;
-  --accent-hover: #c6b9ec;
-  --success: #79bba5;
-  --danger: #e18b91;
+  --accent: #51e9b5;
+  --accent-hover: #91ffda;
+  --accent-soft: rgba(81, 233, 181, 0.09);
 
+  --cyan: #61d8eb;
+  --amber: #f3b66a;
+  --success: #62ddb0;
+  --danger: #ff777e;
+
+  color: var(--text);
+  background: var(--bg);
   color-scheme: dark;
+
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -57,12 +67,8 @@ textarea {
   font-family: inherit;
 }
 
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-select:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 3px;
+button {
+  cursor: pointer;
 }
 
 button:disabled {
@@ -70,13 +76,93 @@ button:disabled {
   opacity: 0.55;
 }
 
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
 #root {
   min-height: 100vh;
 }
 
+/* Subtle grid. Decorative only. */
+.tf-grid {
+  background-color: var(--bg);
+  background-image:
+    linear-gradient(
+      rgba(65, 126, 116, 0.055) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      rgba(65, 126, 116, 0.055) 1px,
+      transparent 1px
+    );
+  background-size: 36px 36px;
+}
+
+/* Soft environmental glow, not a bright overlay. */
+.tf-ambient {
+  background-image:
+    radial-gradient(
+      ellipse 65% 45% at 80% 0%,
+      rgba(31, 126, 101, 0.075),
+      transparent 75%
+    ),
+    radial-gradient(
+      ellipse 50% 35% at 5% 90%,
+      rgba(32, 120, 143, 0.045),
+      transparent 80%
+    );
+}
+
+.tf-panel {
+  border: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.tf-glow-border {
+  box-shadow:
+    inset 0 1px 0 rgba(117, 242, 192, 0.06),
+    0 0 18px rgba(49, 186, 144, 0.045);
+}
+
+.tf-mono {
+  font-family: var(--font-mono);
+}
+
+.tf-terminal-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.tf-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
+  box-shadow: 0 0 10px rgba(81, 233, 181, 0.45);
+}
+
+/* For long, potentially hostile indicator strings. */
+.tf-ioc-value {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+  user-select: text;
+}
+
 ::selection {
-  color: #fff;
-  background: #595074;
+  color: #06120e;
+  background: #80f0c9;
 }
 
 ::-webkit-scrollbar {
@@ -85,16 +171,16 @@ button:disabled {
 }
 
 ::-webkit-scrollbar-track {
-  background: #111319;
+  background: #091114;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #343947;
+  background: #29433f;
   border-radius: 8px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #4e5464;
+  background: #3d6b5e;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -103,5 +189,6 @@ button:disabled {
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

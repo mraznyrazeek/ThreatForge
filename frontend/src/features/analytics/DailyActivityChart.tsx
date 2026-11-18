@@ -34,12 +34,12 @@ type ActivityMetric =
   | 'distinctIndicatorCount'
 
 const COLORS = [
-  '#B6A0EF',
-  '#65B8B1',
-  '#D5A36D',
-  '#7F9FD6',
-  '#D28DAD',
-  '#96B9CA',
+  '#51E9B5',
+  '#61D8EB',
+  '#F3B66A',
+  '#91A9FF',
+  '#EC93AE',
+  '#B0D5CE',
 ]
 
 const numberFormatter = new Intl.NumberFormat('en-US')
@@ -52,9 +52,7 @@ const METRIC_LABELS: Record<ActivityMetric, string> = {
 function formatDate(date: string): string {
   const parts = date.split('-')
 
-  if (parts.length !== 3) {
-    return date
-  }
+  if (parts.length !== 3) return date
 
   return `${parts[1]}/${parts[2]}`
 }
@@ -97,38 +95,30 @@ export function DailyActivityChart({
     sources.length > 0
 
   const dateRange = useMemo(() => {
-    if (dates.length === 0) {
-      return 'No activity dates'
-    }
-
-    if (dates.length === 1) {
-      return dates[0]
-    }
+    if (dates.length === 0) return 'No activity dates'
+    if (dates.length === 1) return dates[0]
 
     return `${dates[0]} — ${dates[dates.length - 1]}`
   }, [dates])
 
   const sourceSeries = useMemo(() => {
     return sources.map((sourceName, index) => {
-      const sourceRecords = records.filter(
-        (item) => item.sourceName === sourceName,
-      )
-
       const recordsByDate = new Map<
         string,
         DailyThreatActivityItem
       >()
 
-      sourceRecords.forEach((item) => {
-        recordsByDate.set(item.dateUtc, item)
-      })
+      records
+        .filter((item) => item.sourceName === sourceName)
+        .forEach((item) => {
+          recordsByDate.set(item.dateUtc, item)
+        })
 
       return {
         name: sourceName,
         color: COLORS[index % COLORS.length],
         values: dates.map((date) => {
           const record = recordsByDate.get(date)
-
           return record ? record[metric] : null
         }),
       }
@@ -138,9 +128,7 @@ export function DailyActivityChart({
   useEffect(() => {
     const element = chartRef.current
 
-    if (!element || !hasData) {
-      return
-    }
+    if (!element || !hasData) return
 
     const chart = echarts.init(element, undefined, {
       renderer: 'svg',
@@ -148,9 +136,7 @@ export function DailyActivityChart({
 
     chart.setOption({
       backgroundColor: 'transparent',
-
       color: sourceSeries.map((item) => item.color),
-
       animationDuration: 600,
 
       legend: {
@@ -158,20 +144,21 @@ export function DailyActivityChart({
         top: 6,
         left: 8,
         right: 8,
-
         icon: 'roundRect',
-        itemWidth: 13,
+        itemWidth: 14,
         itemHeight: 7,
-        itemGap: 18,
+        itemGap: 20,
 
         textStyle: {
-          color: '#C2C3D0',
+          color: '#B0D8CA',
           fontSize: 11,
         },
 
         pageTextStyle: {
-          color: '#A6A2B7',
+          color: '#85AD9D',
         },
+
+        inactiveColor: '#52756A',
       },
 
       tooltip: {
@@ -181,26 +168,29 @@ export function DailyActivityChart({
         axisPointer: {
           type: 'cross',
           label: {
-            backgroundColor: '#353043',
+            backgroundColor: '#204439',
+            color: '#DDF9EC',
+          },
+
+          crossStyle: {
+            color: '#4C9B7D',
           },
         },
 
-        backgroundColor: '#222530',
-        borderColor: '#494457',
+        backgroundColor: '#0B1919',
+        borderColor: '#37725C',
         borderWidth: 1,
+        padding: 12,
 
         textStyle: {
-          color: '#ECE8F5',
+          color: '#E4F9EF',
           fontSize: 12,
         },
 
-        valueFormatter: (value: unknown) => {
-          if (typeof value === 'number') {
-            return numberFormatter.format(value)
-          }
-
-          return 'No record'
-        },
+        valueFormatter: (value: unknown) =>
+          typeof value === 'number'
+            ? numberFormatter.format(value)
+            : 'No record',
       },
 
       grid: {
@@ -218,7 +208,7 @@ export function DailyActivityChart({
 
         axisLine: {
           lineStyle: {
-            color: '#424653',
+            color: '#335B4C',
           },
         },
 
@@ -227,7 +217,7 @@ export function DailyActivityChart({
         },
 
         axisLabel: {
-          color: '#9599A8',
+          color: '#8BAF9F',
           fontSize: 10,
           hideOverlap: true,
           formatter: (value: string) =>
@@ -246,7 +236,7 @@ export function DailyActivityChart({
         name: METRIC_LABELS[metric],
 
         nameTextStyle: {
-          color: '#9296A5',
+          color: '#87B5A3',
           fontSize: 10,
           padding: [0, 0, 5, 0],
         },
@@ -260,7 +250,7 @@ export function DailyActivityChart({
         },
 
         axisLabel: {
-          color: '#9296A5',
+          color: '#8BAF9F',
           fontSize: 10,
           formatter: (value: number) =>
             numberFormatter.format(value),
@@ -268,7 +258,7 @@ export function DailyActivityChart({
 
         splitLine: {
           lineStyle: {
-            color: '#303440',
+            color: '#244039',
             type: 'dashed',
           },
         },
@@ -288,34 +278,33 @@ export function DailyActivityChart({
           filterMode: 'none',
           height: 20,
           bottom: 32,
-
           start: dates.length > 30 ? 65 : 0,
           end: 100,
 
-          borderColor: '#3C4050',
-          backgroundColor: '#20232D',
-          fillerColor: 'rgba(169, 153, 223, 0.17)',
+          borderColor: '#315548',
+          backgroundColor: '#0C201B',
+          fillerColor: 'rgba(81, 233, 181, 0.15)',
 
           handleStyle: {
-            color: '#A999DF',
-            borderColor: '#B6A0EF',
+            color: '#51E9B5',
+            borderColor: '#85F4CA',
           },
 
           moveHandleStyle: {
-            color: '#A999DF',
+            color: '#51E9B5',
           },
 
           textStyle: {
-            color: '#9296A5',
+            color: '#83AB99',
             fontSize: 10,
           },
 
           dataBackground: {
             lineStyle: {
-              color: '#71658F',
+              color: '#438A70',
             },
             areaStyle: {
-              color: '#302B41',
+              color: '#153B2D',
             },
           },
         },
@@ -326,7 +315,6 @@ export function DailyActivityChart({
         type: 'line',
 
         data: source.values,
-
         smooth: false,
         connectNulls: false,
 
@@ -337,6 +325,9 @@ export function DailyActivityChart({
         lineStyle: {
           width: 2.5,
           color: source.color,
+          shadowColor: source.color,
+          shadowBlur: 5,
+          shadowOffsetY: 0,
         },
 
         itemStyle: {
@@ -365,23 +356,27 @@ export function DailyActivityChart({
   return (
     <section
       aria-labelledby="activity-heading"
-      className="overflow-hidden rounded-lg border border-[#30343F] bg-[#191C24]"
+      className="tf-glow-border overflow-hidden rounded border border-[#2C5749] bg-[#101A1D]"
     >
-      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#30343F] px-5 py-4">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-[#294A40] bg-[#0D1A1B] px-5 py-4">
         <div>
+          <p className="font-mono text-[10px] tracking-wider text-[#6FB89A]">
+            // SOURCE ACTIVITY
+          </p>
+
           <h2
             id="activity-heading"
-            className="text-sm font-semibold text-[#EEEAF5]"
+            className="mt-1 text-sm font-semibold text-[#DDF8EB]"
           >
             Threat activity timeline
           </h2>
 
-          <p className="mt-1 text-xs text-[#9296A4]">
+          <p className="mt-1 text-xs text-[#8CAFA2]">
             Daily intelligence activity by source
           </p>
         </div>
 
-        <div className="flex rounded-md border border-[#3C4050] bg-[#14161D] p-1">
+        <div className="flex rounded border border-[#315648] bg-[#091713] p-1">
           {(
             [
               'observationCount',
@@ -393,55 +388,52 @@ export function DailyActivityChart({
               type="button"
               aria-pressed={metric === value}
               onClick={() => setMetric(value)}
-              className={`rounded px-3 py-1.5 text-[11px] font-medium transition-colors ${
+              className={`rounded px-3 py-1.5 font-mono text-[10px] transition-colors ${
                 metric === value
-                  ? 'bg-[#393048] text-[#E0D4FA]'
-                  : 'text-[#9599A8] hover:text-[#DFDAEA]'
+                  ? 'bg-[#1B4A36] text-[#B7F8D8]'
+                  : 'text-[#85A99A] hover:text-[#DDF8EB]'
               }`}
             >
               {value === 'observationCount'
-                ? 'Observations'
-                : 'Distinct IOCs'}
+                ? 'OBSERVATIONS'
+                : 'DISTINCT IOCS'}
             </button>
           ))}
         </div>
       </div>
 
-      <div className="grid gap-3 border-b border-[#30343F] px-5 py-4 sm:grid-cols-3">
+      <div className="grid gap-3 border-b border-[#294A40] px-5 py-4 sm:grid-cols-3">
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-wider text-[#89909E]">
-            Total observations
+          <p className="tf-terminal-label">
+            TOTAL OBSERVATIONS
           </p>
-
-          <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-[#EDE9F5]">
+          <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-[#70EFC0]">
             {numberFormatter.format(data.totalObservations)}
           </p>
         </div>
 
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-wider text-[#89909E]">
-            Intelligence sources
+          <p className="tf-terminal-label">
+            INTELLIGENCE SOURCES
           </p>
-
-          <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-[#EDE9F5]">
+          <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-[#70DDEA]">
             {sources.length}
           </p>
         </div>
 
         <div>
-          <p className="font-mono text-[10px] uppercase tracking-wider text-[#89909E]">
-            Activity dates
+          <p className="tf-terminal-label">
+            ACTIVITY DATES
           </p>
-
-          <p className="mt-1 font-mono text-lg font-semibold tabular-nums text-[#EDE9F5]">
+          <p className="mt-2 font-mono text-xl font-semibold tabular-nums text-[#F0C183]">
             {numberFormatter.format(dates.length)}
           </p>
         </div>
       </div>
 
       {!hasData ? (
-        <div className="px-5 py-16 text-center text-sm text-[#9296A4]">
-          No daily threat activity data available.
+        <div className="px-5 py-16 text-center font-mono text-xs text-[#88AD9D]">
+          NO DAILY THREAT ACTIVITY DATA AVAILABLE
         </div>
       ) : (
         <div className="px-3 py-4 sm:px-5">
@@ -458,23 +450,23 @@ export function DailyActivityChart({
         </div>
       )}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#30343F] px-5 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[#294A40] bg-[#0D1A1B] px-5 py-3">
         <div className="space-y-1">
-          <p className="font-mono text-[10px] text-[#A5A0B5]">
+          <p className="font-mono text-[10px] text-[#A3D6BD]">
             {dateRange}
           </p>
 
-          <p className="font-mono text-[10px] text-[#777E8D]">
-            Source dates: {data.timezone}. Dates without a
-            source record are not treated as zero activity.
+          <p className="font-mono text-[10px] text-[#789E8E]">
+            SOURCE DATES: {data.timezone}. Missing source-date
+            records are not treated as zero activity.
           </p>
         </div>
 
         <time
           dateTime={data.generatedAtUtc}
-          className="font-mono text-[10px] text-[#858A98]"
+          className="font-mono text-[10px] text-[#789E8E]"
         >
-          Generated:{' '}
+          GENERATED{' '}
           {new Date(data.generatedAtUtc).toLocaleString()}
         </time>
       </div>

@@ -1,5 +1,6 @@
 
 import { useCallback, useEffect, useState } from 'react'
+
 import { useAuth } from '../../auth/useAuth'
 import { getThreatIndicators } from '../../services/indicatorsApi'
 import type { PagedIndicatorsResponse } from '../../types/indicators'
@@ -80,6 +81,9 @@ export function IndicatorsPage() {
     setData(null)
     setPage(1)
     setIndicatorType(normalizedType)
+
+    // Also refresh when submitting the current filter.
+    setRefreshKey((previous) => previous + 1)
   }, [typeInput])
 
   const clearFilter = useCallback(() => {
@@ -89,6 +93,7 @@ export function IndicatorsPage() {
     setLoading(true)
     setError(null)
     setData(null)
+    setRefreshKey((previous) => previous + 1)
   }, [])
 
   const changePageSize = useCallback((size: number) => {
@@ -109,7 +114,6 @@ export function IndicatorsPage() {
   const refresh = useCallback(() => {
     setLoading(true)
     setError(null)
-    setData(null)
     setRefreshKey((previous) => previous + 1)
   }, [])
 
@@ -130,22 +134,29 @@ export function IndicatorsPage() {
       aria-labelledby="indicators-heading"
       className="space-y-5"
     >
-      {/* Page heading */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* Heading */}
+      <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#29473D] pb-5">
         <div>
-          <p className="font-mono text-[10px] text-[#8E92A0]">
-            Intelligence / Indicators
+          <p className="font-mono text-[10px] tracking-wide text-[#79BA9D]">
+            THREATFORGE / INTELLIGENCE / INDICATORS
           </p>
 
-          <h1
-            id="indicators-heading"
-            className="mt-2 text-[25px] font-semibold tracking-[-0.04em] text-[#F1F0F5]"
-          >
-            Threat Indicators
-          </h1>
+          <div className="mt-3 flex items-center gap-3">
+            <span
+              aria-hidden="true"
+              className="h-7 w-[3px] rounded bg-[#51E9B5] shadow-[0_0_12px_rgba(81,233,181,0.3)]"
+            />
 
-          <p className="mt-1 text-xs text-[#9296A4]">
-            Browse indicators stored in the intelligence database.
+            <h1
+              id="indicators-heading"
+              className="text-[clamp(1.5rem,3vw,2rem)] font-semibold tracking-[-0.045em] text-[#E8FFF5]"
+            >
+              Threat Indicators
+            </h1>
+          </div>
+
+          <p className="mt-2 text-xs text-[#8BAA9E]">
+            Explore canonical IOCs and their current source-observation counts
           </p>
         </div>
 
@@ -153,99 +164,112 @@ export function IndicatorsPage() {
           type="button"
           onClick={refresh}
           disabled={loading}
-          className="rounded-md border border-[#454251] bg-[#211F2B] px-4 py-2 text-xs font-medium text-[#C5B9E4] transition-colors hover:border-[#8E82BF] disabled:opacity-50"
+          className="inline-flex h-9 items-center gap-2 rounded border border-[#398064] bg-[#143126] px-4 font-mono text-[10px] font-medium tracking-wide text-[#A2F1D0] transition-colors hover:border-[#6CE8B6] hover:bg-[#1B4433] disabled:opacity-50"
         >
-          {loading ? 'Loading...' : '↻ Refresh'}
+          <span aria-hidden="true">↻</span>
+          {loading ? 'UPDATING' : 'REFRESH DATA'}
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-end gap-3 rounded-md border border-[#30343F] bg-[#191C24] p-4">
-        <form
-          className="flex flex-1 flex-wrap items-end gap-3"
-          onSubmit={(event) => {
-            event.preventDefault()
-            applyFilter()
-          }}
-        >
-          <label className="flex min-w-[190px] flex-1 flex-col gap-2">
-            <span className="font-mono text-[10px] uppercase tracking-wider text-[#989DAA]">
-              Indicator type
-            </span>
-
-            <input
-              type="text"
-              value={typeInput}
-              maxLength={64}
-              onChange={(event) =>
-                setTypeInput(event.target.value)
-              }
-              placeholder="Enter indicator type"
-              className="h-9 w-full rounded-md border border-[#414552] bg-[#12151C] px-3 text-xs text-[#EEEAF5] placeholder:text-[#686D7B] focus:border-[#A69ACB] focus:outline-none"
-            />
-          </label>
-
-          <button
-            type="submit"
-            disabled={loading}
-            className="h-9 rounded-md bg-[#B4A3DB] px-4 text-xs font-semibold text-[#1A1622] transition-colors hover:bg-[#D0C2EC] disabled:opacity-50"
-          >
-            Apply filter
-          </button>
-
-          <button
-            type="button"
-            onClick={clearFilter}
-            disabled={loading}
-            className="h-9 rounded-md border border-[#454955] px-4 text-xs text-[#C7C6D0] transition-colors hover:bg-[#292D38] disabled:opacity-50"
-          >
-            Clear
-          </button>
-        </form>
-
-        <label className="flex flex-col gap-2">
-          <span className="font-mono text-[10px] uppercase tracking-wider text-[#989DAA]">
-            Rows per page
+      {/* Filter console */}
+      <div className="overflow-hidden rounded border border-[#2C5246] bg-[#101A1D]">
+        <div className="flex items-center justify-between gap-3 border-b border-[#294A40] bg-[#0D1A1B] px-4 py-3">
+          <span className="font-mono text-[10px] font-medium tracking-[0.12em] text-[#A4E7C8]">
+            // QUERY PARAMETERS
           </span>
 
-          <select
-            value={pageSize}
-            disabled={loading}
-            onChange={(event) =>
-              changePageSize(Number(event.target.value))
-            }
-            className="h-9 rounded-md border border-[#414552] bg-[#12151C] px-3 text-xs text-[#EEEAF5] focus:border-[#A69ACB] focus:outline-none"
+          <span className="font-mono text-[9px] text-[#729F8F]">
+            INDICATOR SEARCH
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-end gap-3 p-4">
+          <form
+            className="flex min-w-0 flex-1 flex-wrap items-end gap-3"
+            onSubmit={(event) => {
+              event.preventDefault()
+              applyFilter()
+            }}
           >
-            <option value={10}>10</option>
-            <option value={20}>20</option>
-            <option value={50}>50</option>
-            <option value={100}>100</option>
-          </select>
-        </label>
+            <label className="flex min-w-[190px] flex-1 flex-col gap-2">
+              <span className="font-mono text-[10px] tracking-wider text-[#83B6A4]">
+                INDICATOR TYPE
+              </span>
+
+              <input
+                type="text"
+                value={typeInput}
+                maxLength={64}
+                onChange={(event) =>
+                  setTypeInput(event.target.value)
+                }
+                placeholder="domain / url / ip:port / sha256_hash"
+                className="h-10 w-full rounded border border-[#315446] bg-[#090F12] px-3 font-mono text-[11px] text-[#E1F7EA] placeholder:text-[#668B7D] focus:border-[#51E9B5] focus:outline-none"
+              />
+            </label>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="h-10 rounded border border-[#4BA67F] bg-[#1C4B39] px-4 font-mono text-[10px] font-semibold tracking-wide text-[#BCF7DB] transition-colors hover:bg-[#27674D] disabled:opacity-50"
+            >
+              APPLY FILTER
+            </button>
+
+            <button
+              type="button"
+              onClick={clearFilter}
+              disabled={loading}
+              className="h-10 rounded border border-[#36564A] bg-[#14231F] px-4 font-mono text-[10px] text-[#A8D1BD] transition-colors hover:bg-[#1D352A] disabled:opacity-50"
+            >
+              CLEAR
+            </button>
+          </form>
+
+          <label className="flex flex-col gap-2">
+            <span className="font-mono text-[10px] tracking-wider text-[#83B6A4]">
+              ROWS PER PAGE
+            </span>
+
+            <select
+              value={pageSize}
+              disabled={loading}
+              onChange={(event) =>
+                changePageSize(Number(event.target.value))
+              }
+              className="h-10 rounded border border-[#315446] bg-[#090F12] px-3 font-mono text-[11px] text-[#E1F7EA] focus:border-[#51E9B5] focus:outline-none"
+            >
+              <option value={10}>10</option>
+              <option value={20}>20</option>
+              <option value={50}>50</option>
+              <option value={100}>100</option>
+            </select>
+          </label>
+        </div>
       </div>
 
       {/* Active filter */}
       {indicatorType && (
-        <div className="flex items-center gap-2 text-xs text-[#A9A2BD]">
-          <span>Filtering by type:</span>
+        <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-[#8FB9A6]">
+          <span>ACTIVE FILTER:</span>
 
-          <span className="rounded border border-[#524966] bg-[#2B263A] px-2 py-1 font-mono text-[10px] text-[#D1C5EF]">
+          <span className="rounded border border-[#34785E] bg-[#123225] px-2.5 py-1 text-[#9CEFC6]">
             {indicatorType}
           </span>
         </div>
       )}
 
       {/* Loading */}
-      {loading && (
+      {loading && !data && (
         <div
           role="status"
-          className="rounded-md border border-[#30343F] bg-[#191C24] p-8"
+          className="rounded border border-[#2C5246] bg-[#101A1D] p-8"
         >
           <div className="flex items-center gap-3">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#474155] border-t-[#B4A3DB]" />
+            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#31594C] border-t-[#51E9B5]" />
 
-            <span className="text-xs text-[#A7A5B5]">
-              Loading threat indicators...
+            <span className="font-mono text-xs text-[#A1D5BE]">
+              RETRIEVING INTELLIGENCE RECORDS...
             </span>
           </div>
         </div>
@@ -255,31 +279,31 @@ export function IndicatorsPage() {
       {error && (
         <div
           role="alert"
-          className="rounded-md border border-[#69434A] bg-[#2B1E23] px-4 py-3 text-xs text-[#E5A4AC]"
+          className="rounded border border-[#794447] bg-[#2A191C] px-4 py-3 text-xs text-[#FFAAAA]"
         >
           {error}
         </div>
       )}
 
       {/* Results */}
-      {!loading && !error && data && (
+      {!error && data && (
         <>
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-[#9095A3]">
+          <div className="flex flex-wrap items-center justify-between gap-3 font-mono text-[10px] text-[#8FB4A4]">
             <span>
-              Showing{' '}
-              <strong className="font-medium text-[#E0DEE7]">
+              SHOWING{' '}
+              <strong className="font-medium text-[#B8F3D8]">
                 {rangeStart.toLocaleString()}–
                 {rangeEnd.toLocaleString()}
               </strong>{' '}
-              of{' '}
-              <strong className="font-medium text-[#E0DEE7]">
+              OF{' '}
+              <strong className="font-medium text-[#B8F3D8]">
                 {data.totalItems.toLocaleString()}
               </strong>{' '}
-              indicators
+              INDICATORS
             </span>
 
-            <span className="font-mono text-[10px]">
-              Page {data.page.toLocaleString()} of{' '}
+            <span>
+              PAGE {data.page.toLocaleString()} /{' '}
               {data.totalPages.toLocaleString()}
             </span>
           </div>
@@ -287,32 +311,32 @@ export function IndicatorsPage() {
           <IndicatorsTable indicators={data.items} />
 
           {/* Pagination */}
-          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#30343F] pt-4">
-            <span className="font-mono text-[10px] text-[#89909E]">
-              {data.totalItems.toLocaleString()} matching records
+          <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#29473D] pt-4">
+            <span className="font-mono text-[10px] text-[#779F8D]">
+              {data.totalItems.toLocaleString()} MATCHING RECORDS
             </span>
 
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                disabled={!data.hasPreviousPage}
+                disabled={loading || !data.hasPreviousPage}
                 onClick={() => changePage(data.page - 1)}
-                className="rounded-md border border-[#414552] px-3 py-2 text-xs text-[#C7C6D0] transition-colors hover:border-[#8E82BF] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded border border-[#365E4E] bg-[#12251E] px-3 py-2 font-mono text-[10px] text-[#ADDCC5] transition-colors hover:border-[#63D9A7] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Previous
+                PREVIOUS
               </button>
 
-              <span className="min-w-16 text-center font-mono text-xs text-[#D6D3DE]">
+              <span className="min-w-20 text-center font-mono text-[11px] text-[#C5EBD9]">
                 {data.page} / {data.totalPages}
               </span>
 
               <button
                 type="button"
-                disabled={!data.hasNextPage}
+                disabled={loading || !data.hasNextPage}
                 onClick={() => changePage(data.page + 1)}
-                className="rounded-md border border-[#414552] px-3 py-2 text-xs text-[#C7C6D0] transition-colors hover:border-[#8E82BF] disabled:cursor-not-allowed disabled:opacity-40"
+                className="rounded border border-[#365E4E] bg-[#12251E] px-3 py-2 font-mono text-[10px] text-[#ADDCC5] transition-colors hover:border-[#63D9A7] disabled:cursor-not-allowed disabled:opacity-40"
               >
-                Next
+                NEXT
               </button>
             </div>
           </div>

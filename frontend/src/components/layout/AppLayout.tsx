@@ -35,7 +35,7 @@ export function AppLayout({
   }
 
   return (
-    <div className="min-h-screen bg-[#0E1015] text-[#E7E8ED]">
+    <div className="min-h-screen bg-[var(--bg)] text-[var(--text)]">
       <Sidebar
         open={mobileMenuOpen}
         activePage={activePage}
@@ -43,18 +43,25 @@ export function AppLayout({
         onClose={handleCloseMenu}
       />
 
-      <div className="min-h-screen lg:ml-[228px]">
-        <Header
-          activePage={activePage}
-          onMenuClick={handleOpenMenu}
+      <div className="relative min-h-screen lg:ml-[244px]">
+        <div
+          aria-hidden="true"
+          className="tf-grid tf-ambient pointer-events-none absolute inset-0"
         />
 
-        <main
-          id="main-content"
-          className="mx-auto w-full max-w-[1540px] px-4 py-6 sm:px-6"
-        >
-          {children}
-        </main>
+        <div className="relative z-10 min-h-screen">
+          <Header
+            activePage={activePage}
+            onMenuClick={handleOpenMenu}
+          />
+
+          <main
+            id="main-content"
+            className="mx-auto w-full max-w-[1540px] px-4 py-6 sm:px-6"
+          >
+            {children}
+          </main>
+        </div>
       </div>
     </div>
   )
