@@ -33,7 +33,8 @@ public sealed class ThreatIndicatorsController : ControllerBase
         GetIndicators(
             [FromQuery] int page = 1,
             [FromQuery] int pageSize = 20,
-            [FromQuery(Name = "type")] string? indicatorType = null,
+            [FromQuery(Name = "type")]
+            string? indicatorType = null,
             CancellationToken cancellationToken = default)
     {
         if (page < 1)
@@ -75,18 +76,79 @@ public sealed class ThreatIndicatorsController : ControllerBase
         {
             throw;
         }
-        catch (NpgsqlException)
+        catch (NpgsqlException ex)
         {
             _logger.LogError(
-                "PostgreSQL indicator retrieval failed.");
+                ex,
+                "PostgreSQL indicator list retrieval failed.");
 
-            return StatusCode(
-                StatusCodes.Status503ServiceUnavailable,
-                new
-                {
-                    Status = "unavailable",
-                    Message = "Indicator data is temporarily unavailable."
-                });
+            return DatabaseUnavailable();
         }
+    }
+
+    [HttpGet("{id:long}")]
+    [ProducesResponseType(
+        typeof(IndicatorDetailResponse),
+        StatusCodes.Status200OK)]
+    [ProducesResponseType(
+        StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(
+        StatusCodes.Status404NotFound)]
+    [ProducesResponseType(
+        StatusCodes.Status503ServiceUnavailable)]
+    public async Task<ActionResult<IndicatorDetailResponse>>
+        GetIndicatorById(
+            [FromRoute] long id,
+            CancellationToken cancellationToken = default)
+    {
+        if (id < 1)
+        {
+            return BadRequest(new
+            {
+                Error = "Indicator ID must be greater than zero."
+            });
+        }
+
+        try
+        {
+            var result = await _service.GetIndicatorByIdAsync(
+                id,
+                cancellationToken);
+
+            if (result is null)
+            {
+                return NotFound(new
+                {
+                    Error = "Indicator not found."
+                });
+            }
+
+            return Ok(result);
+        }
+        catch (OperationCanceledException)
+            when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (NpgsqlException ex)
+        {
+            _logger.LogError(
+                ex,
+                "PostgreSQL indicator detail retrieval failed.");
+
+            return DatabaseUnavailable();
+        }
+    }
+
+    private ObjectResult DatabaseUnavailable()
+    {
+        return StatusCode(
+            StatusCodes.Status503ServiceUnavailable,
+            new
+            {
+                Status = "unavailable",
+                Message =
+                    "Indicator data is temporarily unavailable."
+            });
     }
 }

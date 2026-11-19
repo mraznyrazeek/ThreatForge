@@ -7,6 +7,10 @@ public sealed record IndicatorListItem
 
     public required string IndicatorType { get; init; }
 
+    public required string NormalizedValue { get; init; }
+
+    public required long ObservationCount { get; init; }
+
     public required DateTimeOffset CreatedAtUtc { get; init; }
 }
 

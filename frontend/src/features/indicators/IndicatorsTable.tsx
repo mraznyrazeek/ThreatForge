@@ -7,6 +7,8 @@ import type {
 
 interface IndicatorsTableProps {
   indicators: IndicatorListItem[]
+  selectedIndicatorId: number | null
+  onInvestigate: (indicatorId: number) => void
 }
 
 function formatDate(value: string): string {
@@ -38,6 +40,8 @@ function getTypeStyle(type: string): string {
 
 export function IndicatorsTable({
   indicators,
+  selectedIndicatorId,
+  onInvestigate,
 }: IndicatorsTableProps) {
   const [copiedId, setCopiedId] =
     useState<number | null>(null)
@@ -84,7 +88,7 @@ export function IndicatorsTable({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[840px] border-collapse text-left">
+          <table className="w-full min-w-[900px] border-collapse text-left">
             <thead className="bg-[#122125]">
               <tr className="border-b border-[#29483F]">
                 <th
@@ -125,60 +129,89 @@ export function IndicatorsTable({
             </thead>
 
             <tbody>
-              {indicators.map((indicator) => (
-                <tr
-                  key={indicator.id}
-                  className="border-b border-[#233B37] transition-colors last:border-b-0 hover:bg-[#152923]"
-                >
-                  <td className="max-w-[390px] px-4 py-3.5">
-                    <div className="space-y-1.5">
-                      <div
-                        title={indicator.normalizedValue}
-                        className="max-w-[350px] truncate font-mono text-[12px] text-[#D5F3E5]"
-                      >
-                        {indicator.normalizedValue}
+              {indicators.map((indicator) => {
+                const selected =
+                  selectedIndicatorId === indicator.id
+
+                return (
+                  <tr
+                    key={indicator.id}
+                    className={`border-b border-[#233B37] transition-colors last:border-b-0 ${
+                      selected
+                        ? 'bg-[#15352A]'
+                        : 'hover:bg-[#152923]'
+                    }`}
+                  >
+                    <td className="max-w-[390px] px-4 py-3.5">
+                      <div className="space-y-1.5">
+                        <div
+                          title={indicator.normalizedValue}
+                          className="max-w-[350px] truncate font-mono text-[12px] text-[#D5F3E5]"
+                        >
+                          {indicator.normalizedValue}
+                        </div>
+
+                        <span className="font-mono text-[10px] text-[#678F81]">
+                          IOC_ID #{indicator.id}
+                        </span>
                       </div>
+                    </td>
 
-                      <span className="font-mono text-[10px] text-[#678F81]">
-                        IOC_ID #{indicator.id}
+                    <td className="px-4 py-3.5">
+                      <span
+                        className={`inline-flex whitespace-nowrap rounded border px-2.5 py-1 font-mono text-[10px] ${getTypeStyle(indicator.indicatorType)}`}
+                      >
+                        {indicator.indicatorType}
                       </span>
-                    </div>
-                  </td>
+                    </td>
 
-                  <td className="px-4 py-3.5">
-                    <span
-                      className={`inline-flex whitespace-nowrap rounded border px-2.5 py-1 font-mono text-[10px] ${getTypeStyle(indicator.indicatorType)}`}
-                    >
-                      {indicator.indicatorType}
-                    </span>
-                  </td>
+                    <td className="px-4 py-3.5 text-right">
+                      <span className="font-mono text-[13px] font-medium tabular-nums text-[#67E6B7]">
+                        {indicator.observationCount.toLocaleString()}
+                      </span>
+                    </td>
 
-                  <td className="px-4 py-3.5 text-right">
-                    <span className="font-mono text-[13px] font-medium tabular-nums text-[#67E6B7]">
-                      {indicator.observationCount.toLocaleString()}
-                    </span>
-                  </td>
+                    <td className="whitespace-nowrap px-4 py-3.5 font-mono text-[11px] text-[#8FB4A6]">
+                      {formatDate(indicator.createdAtUtc)}
+                    </td>
 
-                  <td className="whitespace-nowrap px-4 py-3.5 font-mono text-[11px] text-[#8FB4A6]">
-                    {formatDate(indicator.createdAtUtc)}
-                  </td>
+                    <td className="px-4 py-3.5">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            void copyIndicator(indicator)
+                          }}
+                          aria-label={`Copy indicator ${indicator.id} value`}
+                          className="rounded border border-[#356E57] bg-[#143024] px-3 py-2 font-mono text-[10px] font-medium tracking-wide text-[#9AE9C5] transition-colors hover:border-[#70E3B4] hover:bg-[#1B4433]"
+                        >
+                          {copiedId === indicator.id
+                            ? '✓ COPIED'
+                            : 'COPY'}
+                        </button>
 
-                  <td className="px-4 py-3.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void copyIndicator(indicator)
-                      }}
-                      aria-label={`Copy indicator ${indicator.id} value`}
-                      className="rounded border border-[#356E57] bg-[#143024] px-3 py-2 font-mono text-[10px] font-medium tracking-wide text-[#9AE9C5] transition-colors hover:border-[#70E3B4] hover:bg-[#1B4433] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#51E9B5]"
-                    >
-                      {copiedId === indicator.id
-                        ? '✓ COPIED'
-                        : 'COPY'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onInvestigate(indicator.id)
+                          }
+                          aria-expanded={selected}
+                          aria-controls="indicator-investigation"
+                          className={`rounded border px-3 py-2 font-mono text-[10px] font-medium tracking-wide transition-colors ${
+                            selected
+                              ? 'border-[#70E3B4] bg-[#24533D] text-[#D4FFE8]'
+                              : 'border-[#367789] bg-[#102B32] text-[#8DE4F2] hover:border-[#6CD8EC] hover:bg-[#19404B]'
+                          }`}
+                        >
+                          {selected
+                            ? 'SELECTED'
+                            : 'INVESTIGATE'}
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
 
               {indicators.length === 0 && (
                 <tr>
@@ -200,7 +233,7 @@ export function IndicatorsTable({
           </span>
 
           <span className="font-mono text-[10px] text-[#719B8B]">
-            VALUES DISPLAYED AS TEXT
+            IOC VALUES ARE NOT OPENED AUTOMATICALLY
           </span>
         </div>
       </div>

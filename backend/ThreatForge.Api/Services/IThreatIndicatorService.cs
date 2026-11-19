@@ -10,4 +10,8 @@ public interface IThreatIndicatorService
         int pageSize,
         string? indicatorType,
         CancellationToken cancellationToken = default);
+
+    Task<IndicatorDetailResponse?> GetIndicatorByIdAsync(
+        long id,
+        CancellationToken cancellationToken = default);
 }

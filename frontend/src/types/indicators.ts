@@ -2,7 +2,7 @@
 /**
  * ThreatForge indicator API response contracts.
  *
- * Backend source:
+ * Backend:
  * Models/PagedIndicatorsResponse.cs
  *
  * Endpoint:
@@ -12,6 +12,8 @@
 export interface IndicatorListItem {
   id: number
   indicatorType: string
+  normalizedValue: string
+  observationCount: number
   createdAtUtc: string
 }
 

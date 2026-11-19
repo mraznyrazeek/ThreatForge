@@ -2,11 +2,30 @@
 import { useCallback, useEffect, useState } from 'react'
 
 import { useAuth } from '../../auth/useAuth'
-import { getThreatIndicators } from '../../services/indicatorsApi'
-import type { PagedIndicatorsResponse } from '../../types/indicators'
+import {
+  getThreatIndicators,
+  getThreatIndicatorDetail,
+} from '../../services/indicatorsApi'
+
+import type {
+  PagedIndicatorsResponse,
+} from '../../types/indicators'
+
+import type {
+  IndicatorDetailResponse,
+} from '../../types/indicatorDetail'
+
 import { IndicatorsTable } from './IndicatorsTable'
+import { IndicatorInvestigationPanel } from './IndicatorInvestigationPanel'
 
 const DEFAULT_PAGE_SIZE = 20
+
+type DetailState = {
+  indicatorId: number
+  data: IndicatorDetailResponse | null
+  loading: boolean
+  error: string | null
+}
 
 export function IndicatorsPage() {
   const { getAccessToken } = useAuth()
@@ -24,6 +43,13 @@ export function IndicatorsPage() {
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
 
+  const [selectedIndicatorId, setSelectedIndicatorId] =
+    useState<number | null>(null)
+
+  const [detail, setDetail] =
+    useState<DetailState | null>(null)
+
+  // Paginated indicator inventory.
   useEffect(() => {
     const controller = new AbortController()
     let active = true
@@ -68,6 +94,75 @@ export function IndicatorsPage() {
     refreshKey,
   ])
 
+  // Fetch the selected indicator's current source evidence.
+  useEffect(() => {
+    if (selectedIndicatorId === null) {
+      return
+    }
+
+    const controller = new AbortController()
+    let active = true
+    const indicatorId = selectedIndicatorId
+
+    getThreatIndicatorDetail(
+      getAccessToken,
+      indicatorId,
+      controller.signal,
+    )
+      .then((response) => {
+        if (!active) return
+
+        setDetail({
+          indicatorId,
+          data: response,
+          loading: false,
+          error: null,
+        })
+      })
+      .catch((requestError: unknown) => {
+        if (!active || controller.signal.aborted) return
+
+        setDetail({
+          indicatorId,
+          data: null,
+          loading: false,
+          error:
+            requestError instanceof Error
+              ? requestError.message
+              : 'Unable to retrieve indicator intelligence.',
+        })
+      })
+
+    return () => {
+      active = false
+      controller.abort()
+    }
+  }, [getAccessToken, selectedIndicatorId])
+
+  const closeInvestigation = useCallback(() => {
+    setSelectedIndicatorId(null)
+    setDetail(null)
+  }, [])
+
+  const investigate = useCallback(
+    (indicatorId: number) => {
+      if (selectedIndicatorId === indicatorId) {
+        closeInvestigation()
+        return
+      }
+
+      setDetail({
+        indicatorId,
+        data: null,
+        loading: true,
+        error: null,
+      })
+
+      setSelectedIndicatorId(indicatorId)
+    },
+    [selectedIndicatorId, closeInvestigation],
+  )
+
   const applyFilter = useCallback(() => {
     const normalizedType = typeInput.trim()
 
@@ -76,17 +171,17 @@ export function IndicatorsPage() {
       return
     }
 
+    closeInvestigation()
     setLoading(true)
     setError(null)
     setData(null)
     setPage(1)
     setIndicatorType(normalizedType)
-
-    // Also refresh when submitting the current filter.
     setRefreshKey((previous) => previous + 1)
-  }, [typeInput])
+  }, [typeInput, closeInvestigation])
 
   const clearFilter = useCallback(() => {
+    closeInvestigation()
     setTypeInput('')
     setIndicatorType('')
     setPage(1)
@@ -94,28 +189,37 @@ export function IndicatorsPage() {
     setError(null)
     setData(null)
     setRefreshKey((previous) => previous + 1)
-  }, [])
+  }, [closeInvestigation])
 
-  const changePageSize = useCallback((size: number) => {
-    setPageSize(size)
-    setPage(1)
-    setLoading(true)
-    setError(null)
-    setData(null)
-  }, [])
+  const changePageSize = useCallback(
+    (size: number) => {
+      closeInvestigation()
+      setPageSize(size)
+      setPage(1)
+      setLoading(true)
+      setError(null)
+      setData(null)
+    },
+    [closeInvestigation],
+  )
 
-  const changePage = useCallback((nextPage: number) => {
-    setPage(nextPage)
-    setLoading(true)
-    setError(null)
-    setData(null)
-  }, [])
+  const changePage = useCallback(
+    (nextPage: number) => {
+      closeInvestigation()
+      setPage(nextPage)
+      setLoading(true)
+      setError(null)
+      setData(null)
+    },
+    [closeInvestigation],
+  )
 
   const refresh = useCallback(() => {
+    closeInvestigation()
     setLoading(true)
     setError(null)
     setRefreshKey((previous) => previous + 1)
-  }, [])
+  }, [closeInvestigation])
 
   const rangeStart =
     data && data.totalItems > 0
@@ -129,12 +233,18 @@ export function IndicatorsPage() {
       )
     : 0
 
+  // Only display details belonging to the active selection.
+  const activeDetail =
+    selectedIndicatorId !== null &&
+    detail?.indicatorId === selectedIndicatorId
+      ? detail
+      : null
+
   return (
     <section
       aria-labelledby="indicators-heading"
       className="space-y-5"
     >
-      {/* Heading */}
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#29473D] pb-5">
         <div>
           <p className="font-mono text-[10px] tracking-wide text-[#79BA9D]">
@@ -156,7 +266,8 @@ export function IndicatorsPage() {
           </div>
 
           <p className="mt-2 text-xs text-[#8BAA9E]">
-            Explore canonical IOCs and their current source-observation counts
+            Explore canonical IOCs and investigate
+            current source-specific intelligence
           </p>
         </div>
 
@@ -171,7 +282,7 @@ export function IndicatorsPage() {
         </button>
       </div>
 
-      {/* Filter console */}
+      {/* Query parameters */}
       <div className="overflow-hidden rounded border border-[#2C5246] bg-[#101A1D]">
         <div className="flex items-center justify-between gap-3 border-b border-[#294A40] bg-[#0D1A1B] px-4 py-3">
           <span className="font-mono text-[10px] font-medium tracking-[0.12em] text-[#A4E7C8]">
@@ -248,7 +359,6 @@ export function IndicatorsPage() {
         </div>
       </div>
 
-      {/* Active filter */}
       {indicatorType && (
         <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-[#8FB9A6]">
           <span>ACTIVE FILTER:</span>
@@ -259,7 +369,6 @@ export function IndicatorsPage() {
         </div>
       )}
 
-      {/* Loading */}
       {loading && !data && (
         <div
           role="status"
@@ -275,7 +384,6 @@ export function IndicatorsPage() {
         </div>
       )}
 
-      {/* Error */}
       {error && (
         <div
           role="alert"
@@ -285,8 +393,7 @@ export function IndicatorsPage() {
         </div>
       )}
 
-      {/* Results */}
-      {!error && data && (
+      {!loading && !error && data && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 font-mono text-[10px] text-[#8FB4A4]">
             <span>
@@ -308,9 +415,24 @@ export function IndicatorsPage() {
             </span>
           </div>
 
-          <IndicatorsTable indicators={data.items} />
+          <IndicatorsTable
+            indicators={data.items}
+            selectedIndicatorId={selectedIndicatorId}
+            onInvestigate={investigate}
+          />
 
-          {/* Pagination */}
+          {selectedIndicatorId !== null && (
+            <div id="indicator-investigation">
+              <IndicatorInvestigationPanel
+                indicatorId={selectedIndicatorId}
+                data={activeDetail?.data ?? null}
+                loading={activeDetail?.loading ?? true}
+                error={activeDetail?.error ?? null}
+                onClose={closeInvestigation}
+              />
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[#29473D] pt-4">
             <span className="font-mono text-[10px] text-[#779F8D]">
               {data.totalItems.toLocaleString()} MATCHING RECORDS

@@ -9,6 +9,10 @@ import type {
   PagedIndicatorsResponse,
 } from '../types/indicators'
 
+import type {
+  IndicatorDetailResponse,
+} from '../types/indicatorDetail'
+
 const INDICATORS_ENDPOINT =
   '/api/v1/intelligence/indicators'
 
@@ -64,6 +68,36 @@ export async function getThreatIndicators(
 
   return apiGet<PagedIndicatorsResponse>(
     `${INDICATORS_ENDPOINT}?${query.toString()}`,
+    getAccessToken,
+    signal,
+  )
+}
+
+/**
+ * Retrieve one canonical threat indicator together
+ * with its latest source-specific observations.
+ *
+ * Uses the same Keycloak-authenticated API client.
+ *
+ * The backend currently returns up to 100 current
+ * observation records and indicates whether more exist.
+ */
+export async function getThreatIndicatorDetail(
+  getAccessToken: AccessTokenProvider,
+  indicatorId: number,
+  signal?: AbortSignal,
+): Promise<IndicatorDetailResponse> {
+  if (
+    !Number.isSafeInteger(indicatorId) ||
+    indicatorId < 1
+  ) {
+    throw new Error(
+      'Indicator ID must be a positive safe integer.',
+    )
+  }
+
+  return apiGet<IndicatorDetailResponse>(
+    `${INDICATORS_ENDPOINT}/${indicatorId}`,
     getAccessToken,
     signal,
   )
