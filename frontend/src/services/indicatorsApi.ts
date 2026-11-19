@@ -16,6 +16,9 @@ import type {
 const INDICATORS_ENDPOINT =
   '/api/v1/intelligence/indicators'
 
+const MAX_SEARCH_LENGTH = 256
+const MAX_TYPE_LENGTH = 64
+
 /**
  * Retrieve paginated threat indicators from PostgreSQL
  * through the secured ASP.NET Core API.
@@ -23,20 +26,31 @@ const INDICATORS_ENDPOINT =
  * Authentication:
  * Keycloak Bearer JWT
  *
- * Supported filters:
+ * Supported query parameters:
  * - page
  * - pageSize
  * - type
+ * - search
+ *
+ * Search uses server-side, case-insensitive,
+ * literal substring matching.
  */
 export async function getThreatIndicators(
   getAccessToken: AccessTokenProvider,
   params: IndicatorQueryParams,
   signal?: AbortSignal,
 ): Promise<PagedIndicatorsResponse> {
-  const { page, pageSize, indicatorType } = params
+  const {
+    page,
+    pageSize,
+    indicatorType,
+    search,
+  } = params
 
   if (!Number.isInteger(page) || page < 1) {
-    throw new Error('Page must be a positive integer.')
+    throw new Error(
+      'Page must be a positive integer.',
+    )
   }
 
   if (
@@ -49,21 +63,38 @@ export async function getThreatIndicators(
     )
   }
 
+  if (
+    indicatorType !== undefined &&
+    indicatorType.length > MAX_TYPE_LENGTH
+  ) {
+    throw new Error(
+      'Indicator type must not exceed 64 characters.',
+    )
+  }
+
+  if (
+    search !== undefined &&
+    search.length > MAX_SEARCH_LENGTH
+  ) {
+    throw new Error(
+      'IOC search must not exceed 256 characters.',
+    )
+  }
+
   const query = new URLSearchParams({
     page: String(page),
     pageSize: String(pageSize),
   })
 
   const normalizedType = indicatorType?.trim()
+  const normalizedSearch = search?.trim()
 
   if (normalizedType) {
-    if (normalizedType.length > 64) {
-      throw new Error(
-        'Indicator type must not exceed 64 characters.',
-      )
-    }
-
     query.set('type', normalizedType)
+  }
+
+  if (normalizedSearch) {
+    query.set('search', normalizedSearch)
   }
 
   return apiGet<PagedIndicatorsResponse>(

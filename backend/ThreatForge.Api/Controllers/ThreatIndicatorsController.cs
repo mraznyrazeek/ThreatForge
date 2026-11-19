@@ -10,6 +10,8 @@ namespace ThreatForge.Api.Controllers;
 [Route("api/v1/intelligence/indicators")]
 public sealed class ThreatIndicatorsController : ControllerBase
 {
+    private const int MaxSearchLength = 256;
+
     private readonly IThreatIndicatorService _service;
     private readonly ILogger<ThreatIndicatorsController> _logger;
 
@@ -35,6 +37,8 @@ public sealed class ThreatIndicatorsController : ControllerBase
             [FromQuery] int pageSize = 20,
             [FromQuery(Name = "type")]
             string? indicatorType = null,
+            [FromQuery(Name = "search")]
+            string? search = null,
             CancellationToken cancellationToken = default)
     {
         if (page < 1)
@@ -61,12 +65,22 @@ public sealed class ThreatIndicatorsController : ControllerBase
             });
         }
 
+        if (search?.Length > MaxSearchLength)
+        {
+            return BadRequest(new
+            {
+                Error =
+                    "Search must not exceed 256 characters."
+            });
+        }
+
         try
         {
             var result = await _service.GetIndicatorsAsync(
                 page,
                 pageSize,
                 indicatorType,
+                search,
                 cancellationToken);
 
             return Ok(result);

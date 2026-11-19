@@ -9,6 +9,7 @@ public interface IThreatIndicatorService
         int page,
         int pageSize,
         string? indicatorType,
+        string? search,
         CancellationToken cancellationToken = default);
 
     Task<IndicatorDetailResponse?> GetIndicatorByIdAsync(

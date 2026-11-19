@@ -20,6 +20,8 @@ import { IndicatorsTable } from './IndicatorsTable'
 import { IndicatorInvestigationModal } from './IndicatorInvestigationModal'
 
 const DEFAULT_PAGE_SIZE = 20
+const MAX_TYPE_LENGTH = 64
+const MAX_SEARCH_LENGTH = 256
 
 type DetailState = {
   indicatorId: number
@@ -32,18 +34,22 @@ export function IndicatorsPage() {
   const { getAccessToken } = useAuth()
 
   const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(
-    DEFAULT_PAGE_SIZE,
-  )
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE)
 
   const [typeInput, setTypeInput] = useState('')
+  const [searchInput, setSearchInput] = useState('')
+
   const [indicatorType, setIndicatorType] = useState('')
+  const [search, setSearch] = useState('')
 
   const [data, setData] =
     useState<PagedIndicatorsResponse | null>(null)
 
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [validationError, setValidationError] =
+    useState<string | null>(null)
+
   const [refreshKey, setRefreshKey] = useState(0)
 
   const [selectedIndicatorId, setSelectedIndicatorId] =
@@ -52,6 +58,7 @@ export function IndicatorsPage() {
   const [detail, setDetail] =
     useState<DetailState | null>(null)
 
+  // Fetch server-side paginated and filtered results.
   useEffect(() => {
     const controller = new AbortController()
     let active = true
@@ -62,6 +69,7 @@ export function IndicatorsPage() {
         page,
         pageSize,
         indicatorType: indicatorType || undefined,
+        search: search || undefined,
       },
       controller.signal,
     )
@@ -75,12 +83,12 @@ export function IndicatorsPage() {
       .catch((requestError: unknown) => {
         if (!active || controller.signal.aborted) return
 
+        setData(null)
         setError(
           requestError instanceof Error
             ? requestError.message
             : 'Unable to retrieve threat indicators.',
         )
-
         setLoading(false)
       })
 
@@ -93,9 +101,11 @@ export function IndicatorsPage() {
     page,
     pageSize,
     indicatorType,
+    search,
     refreshKey,
   ])
 
+  // Fetch source evidence for the active investigation.
   useEffect(() => {
     if (selectedIndicatorId === null) {
       return
@@ -103,7 +113,6 @@ export function IndicatorsPage() {
 
     const controller = new AbortController()
     let active = true
-
     const indicatorId = selectedIndicatorId
 
     getThreatIndicatorDetail(
@@ -167,32 +176,48 @@ export function IndicatorsPage() {
 
   const applyFilter = useCallback(() => {
     const normalizedType = typeInput.trim()
+    const normalizedSearch = searchInput.trim()
 
-    if (normalizedType.length > 64) {
-      setError(
+    if (typeInput.length > MAX_TYPE_LENGTH) {
+      setValidationError(
         'Indicator type must not exceed 64 characters.',
       )
       return
     }
 
-    closeInvestigation()
+    if (searchInput.length > MAX_SEARCH_LENGTH) {
+      setValidationError(
+        'IOC search must not exceed 256 characters.',
+      )
+      return
+    }
 
-    setLoading(true)
+    closeInvestigation()
+    setValidationError(null)
     setError(null)
+    setLoading(true)
     setData(null)
+
     setPage(1)
     setIndicatorType(normalizedType)
+    setSearch(normalizedSearch)
+
+    // Re-run the request even when filters are unchanged.
     setRefreshKey((previous) => previous + 1)
-  }, [typeInput, closeInvestigation])
+  }, [typeInput, searchInput, closeInvestigation])
 
   const clearFilter = useCallback(() => {
     closeInvestigation()
 
     setTypeInput('')
+    setSearchInput('')
     setIndicatorType('')
+    setSearch('')
     setPage(1)
-    setLoading(true)
+
     setError(null)
+    setValidationError(null)
+    setLoading(true)
     setData(null)
     setRefreshKey((previous) => previous + 1)
   }, [closeInvestigation])
@@ -200,7 +225,6 @@ export function IndicatorsPage() {
   const changePageSize = useCallback(
     (size: number) => {
       closeInvestigation()
-
       setPageSize(size)
       setPage(1)
       setLoading(true)
@@ -213,7 +237,6 @@ export function IndicatorsPage() {
   const changePage = useCallback(
     (nextPage: number) => {
       closeInvestigation()
-
       setPage(nextPage)
       setLoading(true)
       setError(null)
@@ -224,9 +247,9 @@ export function IndicatorsPage() {
 
   const refresh = useCallback(() => {
     closeInvestigation()
-
     setLoading(true)
     setError(null)
+    setData(null)
     setRefreshKey((previous) => previous + 1)
   }, [closeInvestigation])
 
@@ -248,11 +271,16 @@ export function IndicatorsPage() {
       ? detail
       : null
 
+  const hasActiveFilters = Boolean(
+    indicatorType || search,
+  )
+
   return (
     <section
       aria-labelledby="indicators-heading"
       className="min-w-0 space-y-5"
     >
+      {/* Page heading */}
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-[#29473D] pb-5">
         <div>
           <p className="font-mono text-[10px] tracking-wide text-[#79BA9D]">
@@ -274,8 +302,8 @@ export function IndicatorsPage() {
           </div>
 
           <p className="mt-2 text-xs text-[#8BAA9E]">
-            Explore canonical IOCs and investigate
-            current source-specific intelligence
+            Search canonical IOCs and investigate
+            source-specific threat intelligence
           </p>
         </div>
 
@@ -290,26 +318,51 @@ export function IndicatorsPage() {
         </button>
       </div>
 
+      {/* Search and filter console */}
       <div className="overflow-hidden rounded border border-[#2C5246] bg-[#101A1D]">
-        <div className="flex items-center justify-between gap-3 border-b border-[#294A40] bg-[#0D1A1B] px-4 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#294A40] bg-[#0D1A1B] px-4 py-3">
           <span className="font-mono text-[10px] font-medium tracking-[0.12em] text-[#A4E7C8]">
-            // QUERY PARAMETERS
+            // IOC SEARCH CONSOLE
           </span>
 
           <span className="font-mono text-[9px] text-[#729F8F]">
-            INDICATOR SEARCH
+            POSTGRESQL / SERVER-SIDE QUERY
           </span>
         </div>
 
-        <div className="flex flex-wrap items-end gap-3 p-4">
-          <form
-            className="flex min-w-0 flex-1 flex-wrap items-end gap-3"
-            onSubmit={(event) => {
-              event.preventDefault()
-              applyFilter()
-            }}
-          >
-            <label className="flex min-w-[190px] flex-1 flex-col gap-2">
+        <form
+          className="space-y-4 p-4"
+          onSubmit={(event) => {
+            event.preventDefault()
+            applyFilter()
+          }}
+        >
+          <label className="flex min-w-0 flex-col gap-2">
+            <span className="font-mono text-[10px] tracking-wider text-[#83B6A4]">
+              SEARCH IOC VALUE
+            </span>
+
+            <input
+              type="search"
+              value={searchInput}
+              maxLength={MAX_SEARCH_LENGTH}
+              onChange={(event) => {
+                setSearchInput(event.target.value)
+                setValidationError(null)
+              }}
+              placeholder="Search URL, domain, IP address or hash..."
+              autoComplete="off"
+              className="h-11 w-full min-w-0 rounded border border-[#315446] bg-[#090F12] px-3 font-mono text-xs text-[#E1F7EA] placeholder:text-[#668B7D] focus:border-[#51E9B5] focus:outline-none"
+            />
+
+            <span className="font-mono text-[10px] text-[#789D8E]">
+              Literal, case-insensitive substring search.
+              Press Enter to apply.
+            </span>
+          </label>
+
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="flex min-w-[180px] flex-1 flex-col gap-2">
               <span className="font-mono text-[10px] tracking-wider text-[#83B6A4]">
                 INDICATOR TYPE
               </span>
@@ -317,21 +370,44 @@ export function IndicatorsPage() {
               <input
                 type="text"
                 value={typeInput}
-                maxLength={64}
-                onChange={(event) =>
+                maxLength={MAX_TYPE_LENGTH}
+                onChange={(event) => {
                   setTypeInput(event.target.value)
-                }
-                placeholder="domain / url / ip:port / sha256_hash"
+                  setValidationError(null)
+                }}
+                placeholder="All types / domain / url / sha256_hash"
                 className="h-10 w-full rounded border border-[#315446] bg-[#090F12] px-3 font-mono text-[11px] text-[#E1F7EA] placeholder:text-[#668B7D] focus:border-[#51E9B5] focus:outline-none"
               />
+            </label>
+
+            <label className="flex flex-col gap-2">
+              <span className="font-mono text-[10px] tracking-wider text-[#83B6A4]">
+                ROWS PER PAGE
+              </span>
+
+              <select
+                value={pageSize}
+                disabled={loading}
+                onChange={(event) =>
+                  changePageSize(
+                    Number(event.target.value),
+                  )
+                }
+                className="h-10 rounded border border-[#315446] bg-[#090F12] px-3 font-mono text-[11px] text-[#E1F7EA] focus:border-[#51E9B5] focus:outline-none"
+              >
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+                <option value={100}>100</option>
+              </select>
             </label>
 
             <button
               type="submit"
               disabled={loading}
-              className="h-10 rounded border border-[#4BA67F] bg-[#1C4B39] px-4 font-mono text-[10px] font-semibold tracking-wide text-[#BCF7DB] transition-colors hover:bg-[#27674D] disabled:opacity-50"
+              className="h-10 rounded border border-[#4BA67F] bg-[#1C4B39] px-5 font-mono text-[10px] font-semibold tracking-wide text-[#BCF7DB] transition-colors hover:bg-[#27674D] disabled:opacity-50"
             >
-              APPLY FILTER
+              SEARCH
             </button>
 
             <button
@@ -342,56 +418,54 @@ export function IndicatorsPage() {
             >
               CLEAR
             </button>
-          </form>
-
-          <label className="flex flex-col gap-2">
-            <span className="font-mono text-[10px] tracking-wider text-[#83B6A4]">
-              ROWS PER PAGE
-            </span>
-
-            <select
-              value={pageSize}
-              disabled={loading}
-              onChange={(event) =>
-                changePageSize(Number(event.target.value))
-              }
-              className="h-10 rounded border border-[#315446] bg-[#090F12] px-3 font-mono text-[11px] text-[#E1F7EA] focus:border-[#51E9B5] focus:outline-none"
-            >
-              <option value={10}>10</option>
-              <option value={20}>20</option>
-              <option value={50}>50</option>
-              <option value={100}>100</option>
-            </select>
-          </label>
-        </div>
+          </div>
+        </form>
       </div>
 
-      {indicatorType && (
+      {/* Applied filters */}
+      {hasActiveFilters && (
         <div className="flex flex-wrap items-center gap-2 font-mono text-[10px] text-[#8FB9A6]">
-          <span>ACTIVE FILTER:</span>
+          <span>ACTIVE FILTERS:</span>
 
-          <span className="rounded border border-[#34785E] bg-[#123225] px-2.5 py-1 text-[#9CEFC6]">
-            {indicatorType}
+          {search && (
+            <span className="max-w-full break-all rounded border border-[#367789] bg-[#102B32] px-2.5 py-1 text-[#8DE4F2]">
+              SEARCH: {search}
+            </span>
+          )}
+
+          {indicatorType && (
+            <span className="rounded border border-[#34785E] bg-[#123225] px-2.5 py-1 text-[#9CEFC6]">
+              TYPE: {indicatorType}
+            </span>
+          )}
+        </div>
+      )}
+
+      {validationError && (
+        <div
+          role="alert"
+          className="rounded border border-[#795B37] bg-[#2A2117] px-4 py-3 text-xs text-[#E9C18A]"
+        >
+          {validationError}
+        </div>
+      )}
+
+      {/* Loading */}
+      {loading && (
+        <div
+          role="status"
+          className="flex items-center gap-3 rounded border border-[#2C5246] bg-[#101A1D] p-6"
+        >
+          <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#31594C] border-t-[#51E9B5]" />
+
+          <span className="font-mono text-xs text-[#A1D5BE]">
+            SEARCHING THREAT INTELLIGENCE...
           </span>
         </div>
       )}
 
-      {loading && !data && (
-        <div
-          role="status"
-          className="rounded border border-[#2C5246] bg-[#101A1D] p-8"
-        >
-          <div className="flex items-center gap-3">
-            <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#31594C] border-t-[#51E9B5]" />
-
-            <span className="font-mono text-xs text-[#A1D5BE]">
-              RETRIEVING INTELLIGENCE RECORDS...
-            </span>
-          </div>
-        </div>
-      )}
-
-      {error && (
+      {/* API errors */}
+      {error && !loading && (
         <div
           role="alert"
           className="rounded border border-[#794447] bg-[#2A191C] px-4 py-3 text-xs text-[#FFAAAA]"
@@ -400,6 +474,7 @@ export function IndicatorsPage() {
         </div>
       )}
 
+      {/* Search results */}
       {!loading && !error && data && (
         <>
           <div className="flex flex-wrap items-center justify-between gap-3 font-mono text-[10px] text-[#8FB4A4]">
@@ -413,7 +488,7 @@ export function IndicatorsPage() {
               <strong className="font-medium text-[#B8F3D8]">
                 {data.totalItems.toLocaleString()}
               </strong>{' '}
-              INDICATORS
+              MATCHING INDICATORS
             </span>
 
             <span>
@@ -460,6 +535,7 @@ export function IndicatorsPage() {
         </>
       )}
 
+      {/* Modal is rendered independently of the table. */}
       {selectedIndicatorId !== null && (
         <IndicatorInvestigationModal
           indicatorId={selectedIndicatorId}

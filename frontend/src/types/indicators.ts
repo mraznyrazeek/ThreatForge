@@ -1,14 +1,4 @@
 
-/**
- * ThreatForge indicator API response contracts.
- *
- * Backend:
- * Models/PagedIndicatorsResponse.cs
- *
- * Endpoint:
- * GET /api/v1/intelligence/indicators
- */
-
 export interface IndicatorListItem {
   id: number
   indicatorType: string
@@ -31,4 +21,5 @@ export interface IndicatorQueryParams {
   page: number
   pageSize: number
   indicatorType?: string
+  search?: string
 }

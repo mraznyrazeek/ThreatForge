@@ -11,6 +11,7 @@ public sealed class ThreatIndicatorService
     : IThreatIndicatorService
 {
     private const int MaxDetailObservations = 100;
+    private const int MaxSearchLength = 256;
 
     private readonly NpgsqlDataSource _dataSource;
 
@@ -24,6 +25,7 @@ public sealed class ThreatIndicatorService
         int page,
         int pageSize,
         string? indicatorType,
+        string? search,
         CancellationToken cancellationToken = default)
     {
         if (page < 1)
@@ -45,10 +47,22 @@ public sealed class ThreatIndicatorService
                 nameof(indicatorType));
         }
 
+        if (search?.Length > MaxSearchLength)
+        {
+            throw new ArgumentException(
+                "Search exceeds the allowed length.",
+                nameof(search));
+        }
+
         var normalizedType = string.IsNullOrWhiteSpace(
             indicatorType)
             ? null
             : indicatorType.Trim();
+
+        var normalizedSearch = string.IsNullOrWhiteSpace(
+            search)
+            ? null
+            : search.Trim();
 
         long offset = ((long)page - 1) * pageSize;
 
@@ -71,9 +85,30 @@ public sealed class ThreatIndicatorService
                 cancellationToken);
         }
 
-        var whereClause = normalizedType is null
+        var conditions = new List<string>();
+
+        if (normalizedType is not null)
+        {
+            conditions.Add(
+                "i.indicator_type = @indicator_type");
+        }
+
+        if (normalizedSearch is not null)
+        {
+            conditions.Add(
+                """
+                strpos(
+                    lower(i.normalized_value),
+                    lower(@search)
+                ) > 0
+                """);
+        }
+
+        var whereClause = conditions.Count == 0
             ? ""
-            : "WHERE i.indicator_type = @indicator_type";
+            : "WHERE " + string.Join(
+                " AND ",
+                conditions);
 
         var countSql = $"""
             SELECT COUNT(*)
@@ -89,7 +124,13 @@ public sealed class ThreatIndicatorService
                 connection,
                 transaction))
         {
-            AddTypeParameter(countCommand, normalizedType);
+            AddTypeParameter(
+                countCommand,
+                normalizedType);
+
+            AddSearchParameter(
+                countCommand,
+                normalizedSearch);
 
             totalItems = (long)(
                 await countCommand.ExecuteScalarAsync(
@@ -133,7 +174,13 @@ public sealed class ThreatIndicatorService
                 connection,
                 transaction))
         {
-            AddTypeParameter(command, normalizedType);
+            AddTypeParameter(
+                command,
+                normalizedType);
+
+            AddSearchParameter(
+                command,
+                normalizedSearch);
 
             command.Parameters.Add(
                 "page_size",
@@ -399,6 +446,21 @@ public sealed class ThreatIndicatorService
             "indicator_type",
             NpgsqlDbType.Varchar
         ).Value = indicatorType;
+    }
+
+    private static void AddSearchParameter(
+        NpgsqlCommand command,
+        string? search)
+    {
+        if (search is null)
+        {
+            return;
+        }
+
+        command.Parameters.Add(
+            "search",
+            NpgsqlDbType.Text
+        ).Value = search;
     }
 
     private static void AddIndicatorIdParameter(
