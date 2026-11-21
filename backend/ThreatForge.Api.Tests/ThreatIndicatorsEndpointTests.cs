@@ -14,6 +14,9 @@ namespace ThreatForge.Api.Tests;
 
 public sealed class ThreatIndicatorsEndpointTests
 {
+    private const string Endpoint =
+        "/api/v1/intelligence/indicators";
+
     private static (
         WebApplicationFactory<Program> Factory,
         FakeIndicatorService Service
@@ -26,14 +29,13 @@ public sealed class ThreatIndicatorsEndpointTests
             {
                 builder.ConfigureTestServices(services =>
                 {
-                    // Authenticate integration test requests
-                    // using the test-only Analyst identity.
+                    // Use the test-only Analyst identity.
                     // Production continues to use Keycloak JWTs.
                     TestAuthenticationConfiguration
                         .AddTestAuthentication(services);
 
                     // Replace the PostgreSQL-backed service
-                    // with deterministic test data.
+                    // with a deterministic fake.
                     services.RemoveAll<IThreatIndicatorService>();
 
                     services.AddSingleton<IThreatIndicatorService>(
@@ -52,8 +54,7 @@ public sealed class ThreatIndicatorsEndpointTests
         using (factory)
         using (var client = factory.CreateClient())
         {
-            using var response = await client.GetAsync(
-                "/api/v1/intelligence/indicators");
+            using var response = await client.GetAsync(Endpoint);
 
             Assert.Equal(
                 HttpStatusCode.OK,
@@ -69,9 +70,9 @@ public sealed class ThreatIndicatorsEndpointTests
         using (factory)
         using (var client = factory.CreateClient())
         {
-            var result = await client.GetFromJsonAsync<
-                PagedIndicatorsResponse>(
-                "/api/v1/intelligence/indicators?page=1&pageSize=5");
+            var result =
+                await client.GetFromJsonAsync<PagedIndicatorsResponse>(
+                    Endpoint + "?page=1&pageSize=5");
 
             Assert.NotNull(result);
             Assert.Equal(1, result.Page);
@@ -93,18 +94,97 @@ public sealed class ThreatIndicatorsEndpointTests
         using (var client = factory.CreateClient())
         {
             using var response = await client.GetAsync(
-                "/api/v1/intelligence/indicators" +
+                Endpoint +
                 "?type=sha256_hash&page=2&pageSize=10");
 
             Assert.Equal(
                 HttpStatusCode.OK,
                 response.StatusCode);
 
+            Assert.Equal(1, service.CallCount);
             Assert.Equal(2, service.LastPage);
             Assert.Equal(10, service.LastPageSize);
             Assert.Equal(
                 "sha256_hash",
                 service.LastIndicatorType);
+            Assert.Null(service.LastSearch);
+        }
+    }
+
+    [Fact]
+    public async Task GetIndicators_ForwardsSearch()
+    {
+        var (factory, service) = CreateFactory();
+
+        using (factory)
+        using (var client = factory.CreateClient())
+        {
+            using var response = await client.GetAsync(
+                Endpoint + "?search=aldoku77.org");
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                response.StatusCode);
+
+            Assert.Equal(1, service.CallCount);
+            Assert.Equal(
+                "aldoku77.org",
+                service.LastSearch);
+            Assert.Null(service.LastIndicatorType);
+        }
+    }
+
+    [Fact]
+    public async Task GetIndicators_ForwardsCombinedFiltersAndPagination()
+    {
+        var (factory, service) = CreateFactory();
+
+        using (factory)
+        using (var client = factory.CreateClient())
+        {
+            using var response = await client.GetAsync(
+                Endpoint +
+                "?type=url&search=aldoku77.org" +
+                "&page=2&pageSize=10");
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                response.StatusCode);
+
+            Assert.Equal(1, service.CallCount);
+            Assert.Equal("url", service.LastIndicatorType);
+            Assert.Equal(
+                "aldoku77.org",
+                service.LastSearch);
+            Assert.Equal(2, service.LastPage);
+            Assert.Equal(10, service.LastPageSize);
+        }
+    }
+
+    [Theory]
+    [InlineData("%")]
+    [InlineData("_")]
+    [InlineData("\\")]
+    [InlineData("https://example.org/path?a=1&b=2")]
+    public async Task GetIndicators_ForwardsSpecialCharacters(
+        string search)
+    {
+        var (factory, service) = CreateFactory();
+
+        using (factory)
+        using (var client = factory.CreateClient())
+        {
+            var encodedSearch = Uri.EscapeDataString(search);
+
+            using var response = await client.GetAsync(
+                Endpoint + "?search=" + encodedSearch);
+
+            Assert.Equal(
+                HttpStatusCode.OK,
+                response.StatusCode);
+
+            Assert.Equal(1, service.CallCount);
+            Assert.Equal(search, service.LastSearch);
         }
     }
 
@@ -121,13 +201,12 @@ public sealed class ThreatIndicatorsEndpointTests
         using (var client = factory.CreateClient())
         {
             using var response = await client.GetAsync(
-                "/api/v1/intelligence/indicators" + query);
+                Endpoint + query);
 
             Assert.Equal(
                 HttpStatusCode.BadRequest,
                 response.StatusCode);
 
-            // Invalid requests must not reach the service.
             Assert.Equal(0, service.CallCount);
         }
     }
@@ -143,8 +222,28 @@ public sealed class ThreatIndicatorsEndpointTests
             var longType = new string('x', 65);
 
             using var response = await client.GetAsync(
-                "/api/v1/intelligence/indicators?type=" +
-                longType);
+                Endpoint + "?type=" + longType);
+
+            Assert.Equal(
+                HttpStatusCode.BadRequest,
+                response.StatusCode);
+
+            Assert.Equal(0, service.CallCount);
+        }
+    }
+
+    [Fact]
+    public async Task GetIndicators_LongSearch_Returns400()
+    {
+        var (factory, service) = CreateFactory();
+
+        using (factory)
+        using (var client = factory.CreateClient())
+        {
+            var longSearch = new string('x', 257);
+
+            using var response = await client.GetAsync(
+                Endpoint + "?search=" + longSearch);
 
             Assert.Equal(
                 HttpStatusCode.BadRequest,
@@ -158,14 +257,15 @@ public sealed class ThreatIndicatorsEndpointTests
     public async Task GetIndicators_EmptyResults_Returns200()
     {
         var (factory, service) = CreateFactory();
+
         service.ReturnEmpty = true;
 
         using (factory)
         using (var client = factory.CreateClient())
         {
-            var result = await client.GetFromJsonAsync<
-                PagedIndicatorsResponse>(
-                "/api/v1/intelligence/indicators?type=unknown");
+            var result =
+                await client.GetFromJsonAsync<PagedIndicatorsResponse>(
+                    Endpoint + "?type=unknown");
 
             Assert.NotNull(result);
             Assert.Empty(result.Items);
@@ -183,14 +283,34 @@ public sealed class ThreatIndicatorsEndpointTests
         using (factory)
         using (var client = factory.CreateClient())
         {
-            var result = await client.GetFromJsonAsync<
-                PagedIndicatorsResponse>(
-                "/api/v1/intelligence/indicators?page=2&pageSize=5");
+            var result =
+                await client.GetFromJsonAsync<PagedIndicatorsResponse>(
+                    Endpoint + "?page=2&pageSize=5");
 
             Assert.NotNull(result);
             Assert.Equal(2, result.Page);
             Assert.True(result.HasPreviousPage);
             Assert.True(result.HasNextPage);
+        }
+    }
+
+    [Fact]
+    public async Task GetIndicatorById_UnknownIndicator_Returns404()
+    {
+        var (factory, service) = CreateFactory();
+
+        using (factory)
+        using (var client = factory.CreateClient())
+        {
+            using var response = await client.GetAsync(
+                Endpoint + "/999999");
+
+            Assert.Equal(
+                HttpStatusCode.NotFound,
+                response.StatusCode);
+
+            Assert.Equal(1, service.DetailCallCount);
+            Assert.Equal(999999L, service.LastDetailId);
         }
     }
 
@@ -205,18 +325,26 @@ public sealed class ThreatIndicatorsEndpointTests
 
         public string? LastIndicatorType { get; private set; }
 
+        public string? LastSearch { get; private set; }
+
         public bool ReturnEmpty { get; set; }
+
+        public int DetailCallCount { get; private set; }
+
+        public long LastDetailId { get; private set; }
 
         public Task<PagedIndicatorsResponse> GetIndicatorsAsync(
             int page,
             int pageSize,
             string? indicatorType,
+            string? search,
             CancellationToken cancellationToken = default)
         {
             CallCount++;
             LastPage = page;
             LastPageSize = pageSize;
             LastIndicatorType = indicatorType;
+            LastSearch = search;
 
             var total = ReturnEmpty ? 0L : 100L;
 
@@ -225,15 +353,17 @@ public sealed class ThreatIndicatorsEndpointTests
                 : (total + pageSize - 1) / pageSize;
 
             var items = ReturnEmpty
-                ? new List<IndicatorListItem>()
-                : Enumerable.Range(1, pageSize)
-                    .Select(i => new IndicatorListItem
-                    {
-                        Id = ((long)page - 1) * pageSize + i,
-                        IndicatorType = indicatorType ?? "domain",
-                        CreatedAtUtc = DateTimeOffset.UtcNow
-                    })
-                    .ToList();
+            ? new List<IndicatorListItem>()
+            : Enumerable.Range(1, pageSize)
+                .Select(i => new IndicatorListItem
+                {
+                    Id = ((long)page - 1) * pageSize + i,
+                    IndicatorType = indicatorType ?? "domain",
+                    NormalizedValue = $"test-indicator-{i}.example.org",
+                    ObservationCount = 1,
+                    CreatedAtUtc = DateTimeOffset.UtcNow
+                })
+                .ToList();
 
             return Task.FromResult(
                 new PagedIndicatorsResponse
@@ -246,6 +376,17 @@ public sealed class ThreatIndicatorsEndpointTests
                     HasNextPage = page < totalPages,
                     HasPreviousPage = page > 1
                 });
+        }
+
+        public Task<IndicatorDetailResponse?> GetIndicatorByIdAsync(
+            long id,
+            CancellationToken cancellationToken = default)
+        {
+            DetailCallCount++;
+            LastDetailId = id;
+
+            // Simulate a missing indicator.
+            return Task.FromResult<IndicatorDetailResponse?>(null);
         }
     }
 }

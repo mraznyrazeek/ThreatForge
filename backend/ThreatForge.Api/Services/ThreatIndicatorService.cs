@@ -64,6 +64,40 @@ public sealed class ThreatIndicatorService
             ? null
             : search.Trim();
 
+        // The LIKE expression must preserve literal
+        // substring matching. Escape the escape character
+        // first, followed by LIKE's wildcard characters.
+        //
+        // The leading and trailing % are intentional
+        // substring wildcards, not user-supplied wildcards.
+        var searchPattern = normalizedSearch is null
+            ? null
+            : "%" + EscapeLikePattern(
+                normalizedSearch.ToLowerInvariant()) + "%";
+
+        var conditions = new List<string>();
+
+        if (normalizedType is not null)
+        {
+            conditions.Add(
+                "i.indicator_type = @indicator_type");
+        }
+
+        if (searchPattern is not null)
+        {
+            conditions.Add(
+                """
+                lower(i.normalized_value)
+                    LIKE @search_pattern ESCAPE '\'
+                """);
+        }
+
+        var whereClause = conditions.Count == 0
+            ? ""
+            : "WHERE " + string.Join(
+                " AND ",
+                conditions);
+
         long offset = ((long)page - 1) * pageSize;
 
         await using var connection =
@@ -85,31 +119,6 @@ public sealed class ThreatIndicatorService
                 cancellationToken);
         }
 
-        var conditions = new List<string>();
-
-        if (normalizedType is not null)
-        {
-            conditions.Add(
-                "i.indicator_type = @indicator_type");
-        }
-
-        if (normalizedSearch is not null)
-        {
-            conditions.Add(
-                """
-                strpos(
-                    lower(i.normalized_value),
-                    lower(@search)
-                ) > 0
-                """);
-        }
-
-        var whereClause = conditions.Count == 0
-            ? ""
-            : "WHERE " + string.Join(
-                " AND ",
-                conditions);
-
         var countSql = $"""
             SELECT COUNT(*)
             FROM public.threat_indicators AS i
@@ -124,13 +133,10 @@ public sealed class ThreatIndicatorService
                 connection,
                 transaction))
         {
-            AddTypeParameter(
+            AddFilterParameters(
                 countCommand,
-                normalizedType);
-
-            AddSearchParameter(
-                countCommand,
-                normalizedSearch);
+                normalizedType,
+                searchPattern);
 
             totalItems = (long)(
                 await countCommand.ExecuteScalarAsync(
@@ -174,13 +180,10 @@ public sealed class ThreatIndicatorService
                 connection,
                 transaction))
         {
-            AddTypeParameter(
+            AddFilterParameters(
                 command,
-                normalizedType);
-
-            AddSearchParameter(
-                command,
-                normalizedSearch);
+                normalizedType,
+                searchPattern);
 
             command.Parameters.Add(
                 "page_size",
@@ -433,34 +436,34 @@ public sealed class ThreatIndicatorService
         };
     }
 
-    private static void AddTypeParameter(
-        NpgsqlCommand command,
-        string? indicatorType)
+    private static string EscapeLikePattern(string value)
     {
-        if (indicatorType is null)
-        {
-            return;
-        }
-
-        command.Parameters.Add(
-            "indicator_type",
-            NpgsqlDbType.Varchar
-        ).Value = indicatorType;
+        return value
+            .Replace(@"\", @"\\")
+            .Replace("%", @"\%")
+            .Replace("_", @"\_");
     }
 
-    private static void AddSearchParameter(
+    private static void AddFilterParameters(
         NpgsqlCommand command,
-        string? search)
+        string? indicatorType,
+        string? searchPattern)
     {
-        if (search is null)
+        if (indicatorType is not null)
         {
-            return;
+            command.Parameters.Add(
+                "indicator_type",
+                NpgsqlDbType.Varchar
+            ).Value = indicatorType;
         }
 
-        command.Parameters.Add(
-            "search",
-            NpgsqlDbType.Text
-        ).Value = search;
+        if (searchPattern is not null)
+        {
+            command.Parameters.Add(
+                "search_pattern",
+                NpgsqlDbType.Text
+            ).Value = searchPattern;
+        }
     }
 
     private static void AddIndicatorIdParameter(
